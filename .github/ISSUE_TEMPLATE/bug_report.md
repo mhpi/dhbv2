@@ -1,12 +1,11 @@
 ---
-name: Bug Report
+name: 🐛 Bug Report
 about: Identify a bug or concern
 labels: bug_report
+assignees: leoglonz
 ---
 
 <!--
-Welcome! Thanks for helping us improve DDR.
-
 Before creating a new bug report, please confirm one does not already exist for your issue.
 -->
 

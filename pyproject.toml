@@ -24,6 +24,7 @@ dependencies = [
     "bmipy>=2.0.1",
     "numpy~=1.0",
     "pandas >=1.1.5, <=2.2.0",
+    "pre-commit",
     "torch",
     "tqdm",
     "uv",

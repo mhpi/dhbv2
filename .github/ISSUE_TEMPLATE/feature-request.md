@@ -1,12 +1,11 @@
 ---
-name: Enhancement/Feature Request
+name: 🛠️ Enhancement/Feature Request
 about: Suggest something an improvement a New Feature to add
 labels: feature_request
+assignees: leoglonz
 ---
 
 <!--
-Welcome! Thanks considering a way to improve DDR.
-
 Before creating a new feature request please search the issues for relevant feature requests.
 -->
 
