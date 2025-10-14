@@ -22,23 +22,12 @@ requires-python = ">=3.12"
 dynamic = ["version"]
 dependencies = [
     "bmipy>=2.0.1",
-    "geopandas>=1.1.0",
-    "hydra-core>=1.3.2",
-    "ipykernel>=6.29.5",
-    "matplotlib>=3.10.3",
-    "netcdf4>=1.7.2",
-    "numpy>=2.3.0",
-    "pandas>=2.3.0",
-    "polars>=1.30.0",
-    "pydantic>=2.11.5",
-    "scipy>=1.15.3",
-    "sympy>=1.14.0",
-    "torch>=2.7.1",
-    "torchaudio>=2.7.1",
-    "torchvision>=0.22.1",
-    "tqdm>=4.67.1",
-    "uv>=0.7.12",
-    "xarray>=2025.6.0",
+    "numpy~=1.0",
+    "pandas >=1.1.5, <=2.2.0",
+    "torch",
+    "tqdm",
+    "uv",
+    "xarray",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -52,14 +41,14 @@ Repository = "https://github.com/mhpi/dhbv2"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.4.0",
-    "ruff>=0.11.13",
+    "pytest",
+    "ruff",
 ]
 hydrodl2 = [
     "hydrodl2 @ git+https://github.com/mhpi/hydrodl2.git@master"
 ]
 cuda = [
-    "cupy-cuda12x==13.4.1",
+    "cupy-cuda12x",
 ]
 
 [tool.hatch]
