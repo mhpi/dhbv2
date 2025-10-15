@@ -5,9 +5,9 @@
         {
           "name": "bmi_python",
           "params": {
-              "python_type": "dhbv_2_0.DeltaModelBmi",
+              "python_type": "dhbv2.bmi.DeltaModelBmi",
               "model_type_name": "DeltaModelBmi",
-              "init_config": "./data/dhbv_2_0/config/bmi_cat-88306.yml",
+              "init_config": "./data/dhbv2/config/bmi_cat-88306.yml",
               "allow_exceed_end_time": true,
               "main_output_variable": "land_surface_water__runoff_volume_flux",
               "fixed_time_step": false,
@@ -18,7 +18,7 @@
       }
       ],
         "forcing": {
-            "path": "./data/dhbv_2_0/forcing/attributes_jrb_5yr_cat-88306.nc",
+            "path": "./data/dhbv2/forcing/attributes_jrb_5yr_cat-88306.nc",
             "provider": "NetCDF"
         }
     },
@@ -33,16 +33,16 @@
           "formulations": [
             { "name": "bmi_python",
               "params": {
-                "pytorch_model_path": "./data/dhbv_2_0/dHBV_2_0_Ep100.pt",
+                "pytorch_model_path": "./data/dhbv2/dhbv2_ep100.pt",
                 "latitude": 40.36467900401266,
                 "longitude": -77.83367525629326,
                 "area_square_km": 3.253501,
                 "useGPU": false
-            }    
+            }
           }
         ],
             "forcing": {
-                "path": "./data/dhbv_2_0/forcing/attributes_jrb_5yr_cat-88306.nc",
+                "path": "./data/dhbv2/forcing/attributes_jrb_5yr_cat-88306.nc",
                 "provider": "NetCDF"
             }
         }

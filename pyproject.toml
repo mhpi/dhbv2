@@ -1,8 +1,8 @@
 [build-system]
-build-backend = "hatchling.build"
-requires = ["hatchling", "hatch-vcs"]
-# requires = ["setuptools>=42", "wheel"]
-# build-backend = "setuptools.build_meta"
+# build-backend = "hatchling.build"
+# requires = ["hatchling", "hatch-vcs"]
+requires = ["setuptools>=69.0", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "dhbv2"
@@ -15,13 +15,12 @@ authors = [
 ]
 maintainers = [
     { name = "Leo Lonzarich", email = "lglonzaric@gmail.com" },
-    { name = "Tadd Bindas", email = "taddbindas@gmail.com" },
-    { name = "Yalan Song", email = "songyalan1@gmail.com" },
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.9.0"
 dynamic = ["version"]
 dependencies = [
-    "bmipy>=2.0.1",
+    "bmipy",
+    "dmg @ git+https://github.com/mhpi/generic_deltamodel.git@ngiab",
     "numpy~=1.0",
     "pandas >=1.1.5, <=2.2.0",
     "pre-commit",
@@ -29,6 +28,8 @@ dependencies = [
     "tqdm",
     "uv",
     "xarray",
+    "h5netcdf",
+    "netcdf4",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
