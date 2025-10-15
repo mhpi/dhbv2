@@ -12,7 +12,7 @@ data_sampler: MsHydroSampler
 trainer: MsTrainer
 
 save_path: .
-trained_model: models/hydrofabric_15yr/dHBV_2_0_Ep100.pt  # The trained dHBV 2.0 model (+ input data) can be downloaded from: https://pennstateoffice365-my.sharepoint.com/:f:/g/personal/cxs1024_psu_edu/Eqi1NuJ3d2pMpEJpVu0EGSoBigi-VCWVHgOYIRoTeuGiOw?e=HaNNeA
+trained_model: /models/hydrofabric_15yr/dhbv2_ep100.pt  # The trained dHBV 2.0 model (+ input data) can be downloaded from: https://pennstateoffice365-my.sharepoint.com/:f:/g/personal/cxs1024_psu_edu/Eqi1NuJ3d2pMpEJpVu0EGSoBigi-VCWVHgOYIRoTeuGiOw?e=HaNNeA
 
 
 ## Training ------------------------------#
@@ -52,7 +52,7 @@ loss_function:
 ## dPL Model -----------------------------#
 dpl_model:
     rho: 365
-    
+
     phy_model:
         ## Citations ##
         # HBV 2.0 (HBV_2_0): Yalan Song, Tadd Bindas, Chaopeng Shen, et al. High-resolution national-scale water modeling is enhanced by multiscale differentiable physics-informed machine learning. ESS Open Archive. September 26, 2024. https://doi.org/10.22541/essoar.172736277.74497104/v1.
@@ -90,14 +90,14 @@ dpl_model:
         lr_scheduler_params:
             step_size: 10
             gamma: 0.5
-        
+
         forcings: [
             P,
             Temp,
             PET,
         ]
         attributes: [
-            aridity, 
+            aridity,
             meanP,
             ETPOT_Hargr,
             NDVI,

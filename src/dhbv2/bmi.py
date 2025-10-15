@@ -2,6 +2,7 @@
 
 Author: Leo Lonzarich
 """
+
 import json
 import logging
 import os
@@ -13,7 +14,9 @@ import numpy as np
 import torch
 import yaml
 from bmipy import Bmi
-from dMG import ModelHandler, import_data_sampler, utils
+from dmg.core.utils.factory import import_data_sampler
+
+from dmg import ModelHandler, utils
 from numpy.typing import NDArray
 from sklearn.exceptions import DataDimensionalityWarning
 
@@ -23,55 +26,54 @@ log = logging.getLogger(__name__)
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 
-
 # -------------------------------------------- #
 # Dynamic input variables (CSDMS standard names)
 # -------------------------------------------- #
 _dynamic_input_vars = [
-    ('atmosphere_water__liquid_equivalent_precipitation_rate', 'mm d-1'),
-    ('land_surface_air__temperature', 'degC'),
-    ('land_surface_water__potential_evaporation_volume_flux', 'mm d-1'),
+    ("atmosphere_water__liquid_equivalent_precipitation_rate", "mm d-1"),
+    ("land_surface_air__temperature", "degC"),
+    ("land_surface_water__potential_evaporation_volume_flux", "mm d-1"),
 ]
 
 # ------------------------------------------- #
 # Static input variables (CSDMS standard names)
 # ------------------------------------------- #
 _static_input_vars = [
-    ('ratio__mean_potential_evapotranspiration__mean_precipitation', '-'),
-    ('atmosphere_water__daily_mean_of_liquid_equivalent_precipitation_rate', 'mm d-1'),
-    ('land_surface_water__Hargreaves_potential_evaporation_volume_flux', 'mm d-1'),
-    ('land_vegetation__normalized_diff_vegetation_index', '-'),
-    ('free_land_surface_water', 'mm d-1'),
-    ('basin__mean_of_slope', 'm km-1'),
-    ('soil_sand__grid', 'km2'),
-    ('soil_clay__grid', 'km2'),
-    ('soil_silt__grid', 'km2'),
-    ('land_surface_water__glacier_fraction', 'percent'),
-    ('soil_clay__attr', 'percent'),
-    ('soil_gravel__attr', 'percent'),
-    ('soil_sand__attr', 'percent'),
-    ('soil_silt__attr', 'percent'),
-    ('basin__mean_of_elevation', 'm'),
-    ('atmosphere_water__daily_mean_of_temperature', 'degC'),
-    ('land_surface_water__permafrost_fraction', '-'),
-    ('bedrock__permeability', 'm2'),
-    ('p_seasonality', '-'),
-    ('land_surface_water__potential_evaporation_volume_flux_seasonality', '-'),
-    ('land_surface_water__snow_fraction', 'percent'),
-    ('atmosphere_water__precipitation_falling_as_snow_fraction', 'percent'),
-    ('soil_clay__volume_fraction', 'percent'),
-    ('soil_gravel__volume_fraction', 'percent'),
-    ('soil_sand__volume_fraction', 'percent'),
-    ('soil_silt__volume_fraction', 'percent'),
-    ('soil_active-layer__porosity', '-'),
-    ('basin__area', 'km2'),
+    ("ratio__mean_potential_evapotranspiration__mean_precipitation", "-"),
+    ("atmosphere_water__daily_mean_of_liquid_equivalent_precipitation_rate", "mm d-1"),
+    ("land_surface_water__Hargreaves_potential_evaporation_volume_flux", "mm d-1"),
+    ("land_vegetation__normalized_diff_vegetation_index", "-"),
+    ("free_land_surface_water", "mm d-1"),
+    ("basin__mean_of_slope", "m km-1"),
+    ("soil_sand__grid", "km2"),
+    ("soil_clay__grid", "km2"),
+    ("soil_silt__grid", "km2"),
+    ("land_surface_water__glacier_fraction", "percent"),
+    ("soil_clay__attr", "percent"),
+    ("soil_gravel__attr", "percent"),
+    ("soil_sand__attr", "percent"),
+    ("soil_silt__attr", "percent"),
+    ("basin__mean_of_elevation", "m"),
+    ("atmosphere_water__daily_mean_of_temperature", "degC"),
+    ("land_surface_water__permafrost_fraction", "-"),
+    ("bedrock__permeability", "m2"),
+    ("p_seasonality", "-"),
+    ("land_surface_water__potential_evaporation_volume_flux_seasonality", "-"),
+    ("land_surface_water__snow_fraction", "percent"),
+    ("atmosphere_water__precipitation_falling_as_snow_fraction", "percent"),
+    ("soil_clay__volume_fraction", "percent"),
+    ("soil_gravel__volume_fraction", "percent"),
+    ("soil_sand__volume_fraction", "percent"),
+    ("soil_silt__volume_fraction", "percent"),
+    ("soil_active-layer__porosity", "-"),
+    ("basin__area", "km2"),
 ]
 
 # ------------------------------------- #
 # Output variables (CSDMS standard names)
 # ------------------------------------- #
 _output_vars = [
-    ('land_surface_water__runoff_volume_flux', 'm3 s-1'),
+    ("land_surface_water__runoff_volume_flux", "m3 s-1"),
 ]
 
 # ---------------------------------------------- #
@@ -79,40 +81,40 @@ _output_vars = [
 # ---------------------------------------------- #
 _var_name_internal_map = {
     # ----------- Dynamic inputs -----------
-    'P': 'atmosphere_water__liquid_equivalent_precipitation_rate',
-    'Temp': 'land_surface_air__temperature',
-    'PET': 'land_surface_water__potential_evaporation_volume_flux',
+    "P": "atmosphere_water__liquid_equivalent_precipitation_rate",
+    "Temp": "land_surface_air__temperature",
+    "PET": "land_surface_water__potential_evaporation_volume_flux",
     # ----------- Static inputs -----------
-    'aridity': 'ratio__mean_potential_evapotranspiration__mean_precipitation',
-    'meanP': 'atmosphere_water__daily_mean_of_liquid_equivalent_precipitation_rate',
-    'ETPOT_Hargr': 'land_surface_water__Hargreaves_potential_evaporation_volume_flux',
-    'NDVI': 'land_vegetation__normalized_diff_vegetation_index',
-    'FW': 'free_land_surface_water',
-    'meanslope': 'basin__mean_of_slope',
-    'SoilGrids1km_sand': 'soil_sand__grid',
-    'SoilGrids1km_clay': 'soil_clay__grid',
-    'SoilGrids1km_silt': 'soil_silt__grid',
-    'glaciers': 'land_surface_water__glacier_fraction',
-    'HWSD_clay': 'soil_clay__attr',
-    'HWSD_gravel': 'soil_gravel__attr',
-    'HWSD_sand': 'soil_sand__attr',
-    'HWSD_silt': 'soil_silt__attr',
-    'meanelevation': 'basin__mean_of_elevation',
-    'meanTa': 'atmosphere_water__daily_mean_of_temperature',
-    'permafrost': 'land_surface_water__permafrost_fraction',
-    'permeability': 'bedrock__permeability',
-    'seasonality_P': 'p_seasonality',
-    'seasonality_PET': 'land_surface_water__potential_evaporation_volume_flux_seasonality',
-    'snow_fraction': 'land_surface_water__snow_fraction',
-    'snowfall_fraction': 'atmosphere_water__precipitation_falling_as_snow_fraction',
-    'T_clay': 'soil_clay__volume_fraction',
-    'T_gravel': 'soil_gravel__volume_fraction',
-    'T_sand': 'soil_sand__volume_fraction',
-    'T_silt': 'soil_silt__volume_fraction',
-    'Porosity': 'soil_active-layer__porosity',
-    'uparea': 'basin__area',
+    "aridity": "ratio__mean_potential_evapotranspiration__mean_precipitation",
+    "meanP": "atmosphere_water__daily_mean_of_liquid_equivalent_precipitation_rate",
+    "ETPOT_Hargr": "land_surface_water__Hargreaves_potential_evaporation_volume_flux",
+    "NDVI": "land_vegetation__normalized_diff_vegetation_index",
+    "FW": "free_land_surface_water",
+    "meanslope": "basin__mean_of_slope",
+    "SoilGrids1km_sand": "soil_sand__grid",
+    "SoilGrids1km_clay": "soil_clay__grid",
+    "SoilGrids1km_silt": "soil_silt__grid",
+    "glaciers": "land_surface_water__glacier_fraction",
+    "HWSD_clay": "soil_clay__attr",
+    "HWSD_gravel": "soil_gravel__attr",
+    "HWSD_sand": "soil_sand__attr",
+    "HWSD_silt": "soil_silt__attr",
+    "meanelevation": "basin__mean_of_elevation",
+    "meanTa": "atmosphere_water__daily_mean_of_temperature",
+    "permafrost": "land_surface_water__permafrost_fraction",
+    "permeability": "bedrock__permeability",
+    "seasonality_P": "p_seasonality",
+    "seasonality_PET": "land_surface_water__potential_evaporation_volume_flux_seasonality",
+    "snow_fraction": "land_surface_water__snow_fraction",
+    "snowfall_fraction": "atmosphere_water__precipitation_falling_as_snow_fraction",
+    "T_clay": "soil_clay__volume_fraction",
+    "T_gravel": "soil_gravel__volume_fraction",
+    "T_sand": "soil_sand__volume_fraction",
+    "T_silt": "soil_silt__volume_fraction",
+    "Porosity": "soil_active-layer__porosity",
+    "uparea": "basin__area",
     # ----------- Outputs -----------
-    'flow_sim': 'land_surface_water__runoff_volume_flux',
+    "flow_sim": "land_surface_water__runoff_volume_flux",
 }
 
 _var_name_external_map = {v: k for k, v in _var_name_internal_map.items()}
@@ -133,19 +135,17 @@ def bmi_array(arr: list[float]) -> NDArray:
     return np.array(arr, dtype="float64")
 
 
-
-#==============================================================================#
-#==============================================================================#
-#==============================================================================#
+# ==============================================================================#
+# ==============================================================================#
+# ==============================================================================#
 
 
 # MAIN BMI >>>>
 
 
-#==============================================================================#
-#==============================================================================#
-#==============================================================================#
-
+# ==============================================================================#
+# ==============================================================================#
+# ==============================================================================#
 
 
 class DeltaModelBmi(Bmi):
@@ -156,22 +156,23 @@ class DeltaModelBmi(Bmi):
     Note: This dHBV 2.0UH BMI can only run forward inference. To train,
         see dMG package (https://github.com/mhpi/generic_deltaModel).
     """
+
     _att_map = {
-        'model_name':         'dHBV 2.0',
-        'version':            '2.0',
-        'author_name':        'Leo Lonzarich',
-        'time_step_size':     86400,
-        'time_units':         'seconds',
+        "model_name": "dHBV 2.0",
+        "version": "2.0",
+        "author_name": "Leo Lonzarich",
+        "time_step_size": 86400,
+        "time_units": "seconds",
         # 'time_step_type':     '',
         # 'grid_type':          'scalar',
         # 'step_method':        '',
     }
-    
+
     def __init__(
-            self,
-            config_path: Optional[str] = None,
-            verbose=False,
-        ) -> None:
+        self,
+        config_path: Optional[str] = None,
+        verbose=False,
+    ) -> None:
         """Create a BMI dHBV 2.0UH model ready for initialization.
 
         Parameters
@@ -182,17 +183,17 @@ class DeltaModelBmi(Bmi):
             Enables debug print statements if True.
         """
         super().__init__()
-        self._name = self._att_map['model_name']
+        self._name = self._att_map["model_name"]
         self._model = None
         self._initialized = False
         self.verbose = verbose
 
-        self._var_loc = 'node'
+        self._var_loc = "node"
         self._var_grid_id = 0
 
         self._start_time = 0.0
-        self._end_time = np.finfo('d').max
-        self._time_units = 's'
+        self._end_time = np.finfo("d").max
+        self._time_units = "s"
         self._timestep = 0
 
         self.config_bmi = None
@@ -208,11 +209,14 @@ class DeltaModelBmi(Bmi):
                 raise FileNotFoundError(f"Configuration file not found: {config_path}")
             with open(config_path) as f:
                 self.config_bmi = yaml.safe_load(f)
-            self.stepwise = self.config_bmi.get('stepwise', True)
-            
+            self.stepwise = self.config_bmi.get("stepwise", True)
+
             try:
                 model_config_path = os.path.join(
-                    script_dir, '..', '..', self.config_bmi.get('config_model'),
+                    script_dir,
+                    "..",
+                    "..",
+                    self.config_bmi.get("config_model"),
                 )
                 with open(model_config_path) as f:
                     self.config_model = yaml.safe_load(f)
@@ -237,9 +241,9 @@ class DeltaModelBmi(Bmi):
         """Set the values of the given variables."""
         var_dict = {}
         for item in vars:
-            var_dict[item[0]] = {'value': var_value.copy(), 'units': item[1]}
+            var_dict[item[0]] = {"value": var_value.copy(), "units": item[1]}
         return var_dict
-    
+
     def initialize(self, config_path: Optional[str] = None) -> None:
         """(Control function) Initialize the BMI model.
 
@@ -254,7 +258,7 @@ class DeltaModelBmi(Bmi):
             1) Feed all input dataBMI before
                 'bmi.initialize()'. Then internal model is forwarded on all data
                 and generates predictions during '.initialize()'.
-            
+
             2) Run '.initialize()', then pass data day by day as normal during
                 'bmi.update()'. If forwarding period is sufficiently small (say,
                 <100 days), then forwarding LSTM on individual days with saved
@@ -277,43 +281,53 @@ class DeltaModelBmi(Bmi):
                 raise FileNotFoundError(f"Configuration file not found: {config_path}")
             with open(config_path) as f:
                 self.config_bmi = yaml.safe_load(f)
-            self.stepwise = self.config_bmi.get('stepwise', True)
+            self.stepwise = self.config_bmi.get("stepwise", True)
 
         if self.config_bmi is None:
-            raise ValueError("No configuration file given. A config path" \
-                             "must be passed at time of bmi init() or" \
-                             "initialize() call.")
+            raise ValueError(
+                "No configuration file given. A config path"
+                "must be passed at time of bmi init() or"
+                "initialize() call.",
+            )
 
         # Load model configuration.
         if self.config_model is None:
             try:
                 model_config_path = os.path.join(
-                    script_dir, '..', '..', self.config_bmi.get('config_model'),
+                    script_dir,
+                    "..",
+                    "..",
+                    self.config_bmi.get("config_model"),
                 )
                 with open(model_config_path) as f:
                     self.config_model = yaml.safe_load(f)
             except Exception as e:
                 raise RuntimeError(f"Failed to load model configuration: {e}") from e
-        
+
         self.config_model = utils.initialize_config(self.config_model)
-        self.config_model['model_path'] = os.path.join(
-            script_dir, '..', '..', self.config_model.get('trained_model'),
+        self.config_model["model_path"] = os.path.join(
+            script_dir,
+            "..",
+            "..",
+            self.config_model.get("trained_model"),
         )
-        self.device = self.config_model['device']
-        self.internal_dtype = self.config_model['dtype']
-        self.external_dtype = eval(self.config_bmi['dtype'])
-        self.sampler = import_data_sampler(self.config_model['data_sampler'])(self.config_model)
+        self.device = self.config_model["device"]
+        self.internal_dtype = self.config_model["dtype"]
+        self.external_dtype = eval(self.config_bmi["dtype"])
+        self.sampler = import_data_sampler(self.config_model["data_sampler"])(
+            self.config_model,
+        )
 
         # Load static variables from BMI conf
         for name in self._static_var.keys():
             ext_name = map_to_internal(name)
             if ext_name in self.config_bmi.keys():
-                self._static_var[name]['value'] = bmi_array(self.config_bmi[ext_name])
+                self._static_var[name]["value"] = bmi_array(self.config_bmi[ext_name])
             else:
                 log.warning(f"Static variable '{name}' not in BMI config. Skipping.")
 
         # Set simulation parameters.
-        self.current_time = self.config_bmi.get('start_time', 0.0)
+        self.current_time = self.config_bmi.get("start_time", 0.0)
         # self._time_step_size = self.config_bmi.get('time_step_size', 86400)  # Default to 1 day in seconds.
         # self._end_time = self.config_bmi.get('end_time', np.finfo('d').max)\
 
@@ -323,7 +337,7 @@ class DeltaModelBmi(Bmi):
             self._initialized = True
         except Exception as e:
             raise RuntimeError(f"Failed to load trained model: {e}") from e
-        
+
         # Forward simulation on all data in one go.
         if not self.stepwise:
             predictions = self._do_forward()
@@ -332,24 +346,28 @@ class DeltaModelBmi(Bmi):
         # Track BMI runtime.
         self.bmi_process_time += time.time() - t_start
         if self.verbose:
-            log.info(f"BMI Initialize took {time.time() - t_start:.4f} s | Total runtime: {self.bmi_process_time:.4f} s")
+            log.info(
+                f"BMI Initialize took {time.time() - t_start:.4f} s | Total runtime: {self.bmi_process_time:.4f} s",
+            )
 
     def update(self) -> None:
         """(Control function) Advance model state by one time step."""
         t_start = time.time()
-        
+
         # Forward model on individual timesteps if not initialized with forward_init.
         if self.stepwise:
             predictions = self._do_forward()
             self._format_outputs(predictions)
-        
+
         # Increment model time.
         self._timestep += 1
 
         # Track BMI runtime.
         self.bmi_process_time += time.time() - t_start
         if self.verbose:
-            log.info(f"BMI Update took {time.time() - t_start:.4f} s | Total runtime: {self.bmi_process_time:.4f} s")
+            log.info(
+                f"BMI Update took {time.time() - t_start:.4f} s | Total runtime: {self.bmi_process_time:.4f} s",
+            )
 
     def update_until(self, end_time: float) -> None:
         """(Control function) Update model until a particular time.
@@ -387,7 +405,9 @@ class DeltaModelBmi(Bmi):
         # Track BMI runtime.
         self.bmi_process_time += time.time() - t_start
         if self.verbose:
-            log.info(f"BMI Update Until took {time.time() - t_start:.4f} s | Total runtime: {self.bmi_process_time:.4f} s")
+            log.info(
+                f"BMI Update Until took {time.time() - t_start:.4f} s | Total runtime: {self.bmi_process_time:.4f} s",
+            )
 
     def finalize(self) -> None:
         """(Control function) Finalize model."""
@@ -398,17 +418,13 @@ class DeltaModelBmi(Bmi):
         if self.verbose:
             log.info("BMI model finalized.")
 
+    # ==============================================================================#
+    # ==============================================================================#
 
+    # Helper functions for BMI
 
-#==============================================================================#
-#==============================================================================#
-
-        # Helper functions for BMI
-
-#==============================================================================#
-#==============================================================================#
-
-
+    # ==============================================================================#
+    # ==============================================================================#
 
     def _do_forward(self):
         """Forward model and save outputs to return on update call."""
@@ -417,10 +433,14 @@ class DeltaModelBmi(Bmi):
             log.error("No data to forward. Check input variables.")
             return
 
-        n_samples = data_dict['xc_nn_norm'].shape[1]
-        batch_start = np.arange(0, n_samples, self.config_model['predict']['batch_size'])
+        n_samples = data_dict["xc_nn_norm"].shape[1]
+        batch_start = np.arange(
+            0,
+            n_samples,
+            self.config_model["predict"]["batch_size"],
+        )
         batch_end = np.append(batch_start[1:], n_samples)
-        
+
         batch_predictions = []
         # Forward through basins in batches.
         with torch.no_grad():
@@ -435,12 +455,13 @@ class DeltaModelBmi(Bmi):
                 self.prediction = self._model.forward(dataset_sample, eval=True)
 
                 # For single hydrology model.
-                model_name = self.config_model['dpl_model']['phy_model']['model'][0]
+                model_name = self.config_model["dpl_model"]["phy_model"]["model"][0]
                 prediction = {
-                    key: tensor.cpu().detach() for key, tensor in self.prediction[model_name].items()
+                    key: tensor.cpu().detach()
+                    for key, tensor in self.prediction[model_name].items()
                 }
                 batch_predictions.append(prediction)
-        
+
         return self._batch_data(batch_predictions)
 
         # preds = torch.cat([d['flow_sim'] for d in batched_preds_list], dim=1)
@@ -452,17 +473,17 @@ class DeltaModelBmi(Bmi):
     @staticmethod
     def _load_trained_model(config: dict):
         """Load a pre-trained model based on the configuration."""
-        model_path = config.get('model_path')
+        model_path = config.get("model_path")
         if not model_path:
             raise ValueError("No model path specified in configuration.")
         if not Path(model_path).exists():
             raise FileNotFoundError(f"Model file not found: {model_path}")
         return ModelHandler(config, verbose=True)
-    
+
     # def update_frac(self, time_frac: float) -> None:
     #     """
     #     Update model by a fraction of a time step.
-        
+
     #     Parameters
     #     ----------
     #     time_frac : float
@@ -482,43 +503,52 @@ class DeltaModelBmi(Bmi):
             if outputs is None:
                 log.error("No outputs to format. Check model predictions.")
                 output_val = np.zeros(1)
-            elif not isinstance(outputs['flow_sim'], np.ndarray):
+            elif not isinstance(outputs["flow_sim"], np.ndarray):
                 output_val = outputs[internal_name].detach().cpu().numpy()
             else:
                 output_val = outputs[internal_name]
-            
+
             if self.stepwise:
-                self._output_vars[name]['value'] = np.append(
-                    self._output_vars[name]['value'], output_val,
+                self._output_vars[name]["value"] = np.append(
+                    self._output_vars[name]["value"],
+                    output_val,
                 )
             else:
-                self._output_vars[name]['value'] = output_val
+                self._output_vars[name]["value"] = output_val
 
     def _format_inputs(self):
         """Format dynamic and static inputs for the model."""
-        #=====================================================================#
+        # =====================================================================#
         x_list = []
         c_list = []
 
         for name, data in self._dynamic_var.items():
-            if data['value'].size == 0:
+            if data["value"].size == 0:
                 log.info(f"Dynamic variable '{name}' has no value.")
                 return {}
-            if data['value'].ndim == 1:
-                data['value'] = np.expand_dims(data['value'], axis=(1, 2))  # Shape: (n, 1, 1)
-            elif data['value'].ndim == 2:
-                data['value'] = np.expand_dims(data['value'], axis=2)  # Shape: (n, m, 1)
-            elif data['value'].ndim != 3:
-                raise ValueError(f"Dynamic variable '{name}' has unsupported " \
-                                 f"dimensions ({data['value'].ndim}).")
-            x_list.append(data['value'])
-            
+            if data["value"].ndim == 1:
+                data["value"] = np.expand_dims(
+                    data["value"],
+                    axis=(1, 2),
+                )  # Shape: (n, 1, 1)
+            elif data["value"].ndim == 2:
+                data["value"] = np.expand_dims(
+                    data["value"],
+                    axis=2,
+                )  # Shape: (n, m, 1)
+            elif data["value"].ndim != 3:
+                raise ValueError(
+                    f"Dynamic variable '{name}' has unsupported "
+                    f"dimensions ({data['value'].ndim}).",
+                )
+            x_list.append(data["value"])
+
         for name, data in self._static_var.items():
-            if data['value'].size == 0:
+            if data["value"].size == 0:
                 raise ValueError(f"Static variable '{name}' has no value.")
-            if data['value'].ndim != 2:
-                data['value'] = np.expand_dims(data['value'], axis=(0,1))
-            c_list.append(data['value'])
+            if data["value"].ndim != 2:
+                data["value"] = np.expand_dims(data["value"], axis=(0, 1))
+            c_list.append(data["value"])
 
         x = np.concatenate(x_list, axis=2)
         x = self._fill_nan(x)
@@ -526,19 +556,21 @@ class DeltaModelBmi(Bmi):
 
         xc_nn_norm, c_nn_norm = self.normalize(x.copy(), c)
 
-
         # Get upstream area and elevation
         try:
-            ac_name = self.config_model['observations']['upstream_area_name']
-            ac_array = self._static_var[map_to_external(ac_name)]['value']
+            ac_name = self.config_model["observations"]["upstream_area_name"]
+            ac_array = self._static_var[map_to_external(ac_name)]["value"]
         except ValueError as e:
-            raise ValueError("Upstream area is not provided. This is needed for high-resolution streamflow model.") from e
+            raise ValueError(
+                "Upstream area is not provided. This is needed for high-resolution streamflow model.",
+            ) from e
         try:
-            elevation_name = self.config_model['observations']['elevation_name']
-            elev_array = self._static_var[map_to_external(elevation_name)]['value']
+            elevation_name = self.config_model["observations"]["elevation_name"]
+            elev_array = self._static_var[map_to_external(elevation_name)]["value"]
         except ValueError as e:
-            raise ValueError("Elevation is not provided. This is needed for high-resolution streamflow model.") from e
-
+            raise ValueError(
+                "Elevation is not provided. This is needed for high-resolution streamflow model.",
+            ) from e
 
         # Convert to torch tensors.
         # dataset = {
@@ -550,15 +582,15 @@ class DeltaModelBmi(Bmi):
         #     'x_phy': torch.tensor(x, dtype=torch.float32, device=self.device),
         # }
         dataset = {
-            'ac_all': ac_array.squeeze(-1),
-            'elev_all': elev_array.squeeze(-1),
-            'c_nn': c,
-            'xc_nn_norm': xc_nn_norm,
-            'c_nn_norm': c_nn_norm,
-            'x_phy': x,
+            "ac_all": ac_array.squeeze(-1),
+            "elev_all": elev_array.squeeze(-1),
+            "c_nn": c,
+            "xc_nn_norm": xc_nn_norm,
+            "c_nn_norm": c_nn_norm,
+            "x_phy": x,
         }
         return dataset
-        #=====================================================================#
+        # =====================================================================#
 
     def normalize(
         self,
@@ -584,14 +616,14 @@ class DeltaModelBmi(Bmi):
         del x_nn_norm, x_nn
 
         return xc_nn_norm, c_nn_norm
-    
+
     def _to_norm(
         self,
         data: NDArray[np.float32],
         vars: list[str],
     ) -> NDArray[np.float32]:
         """Standard data normalization."""
-        log_norm_vars = self.config_model['dpl_model']['phy_model']['use_log_norm']
+        log_norm_vars = self.config_model["dpl_model"]["phy_model"]["use_log_norm"]
 
         data_norm = np.zeros(data.shape)
 
@@ -609,13 +641,13 @@ class DeltaModelBmi(Bmi):
             else:
                 raise DataDimensionalityWarning("Data dimension must be 2 or 3.")
         return data_norm
-    
+
     def load_norm_stats(self) -> None:
         """Load normalization statistics."""
         path = os.path.join(
-            self.config_model['model_path'],
-            '..',
-            'normalization_statistics.json',
+            self.config_model["model_path"],
+            "..",
+            "normalization_statistics.json",
         )
         try:
             with open(os.path.abspath(path)) as f:
@@ -627,7 +659,7 @@ class DeltaModelBmi(Bmi):
         """Process model predictions and store them in output variables."""
         for var_name, prediction in predictions.items():
             if var_name in self._output_vars:
-                self._output_vars[var_name]['value'] = prediction.cpu().numpy()
+                self._output_vars[var_name]["value"] = prediction.cpu().numpy()
             else:
                 log.warning(f"Output variable '{var_name}' not recognized. Skipping.")
 
@@ -647,9 +679,11 @@ class DeltaModelBmi(Bmi):
                     dim = 1
                 else:
                     dim = 0
-                data[key] = torch.cat([d[key] for d in batch_list], dim=dim).cpu().numpy()
+                data[key] = (
+                    torch.cat([d[key] for d in batch_list], dim=dim).cpu().numpy()
+                )
             return data
-        
+
         except ValueError as e:
             raise ValueError(f"Error concatenating batch data: {e}") from e
 
@@ -671,25 +705,31 @@ class DeltaModelBmi(Bmi):
                 # Only interpolate if there are NaNs and at least two non-NaN values for reference
                 if np.any(nans) and np.sum(non_nans) > 1:
                     # Perform linear interpolation using numpy.interp
-                    array_3d[i, :, j] = np.interp(x, x[non_nans], slice_1d[non_nans], left=None, right=None)
+                    array_3d[i, :, j] = np.interp(
+                        x,
+                        x[non_nans],
+                        slice_1d[non_nans],
+                        left=None,
+                        right=None,
+                    )
         return array_3d
-    
+
     def array_to_tensor(self) -> None:
         """Converts input values into Torch tensor object to be read by model."""
         raise NotImplementedError("array_to_tensor")
-    
+
     def tensor_to_array(self) -> None:
         """
         Converts model output Torch tensor into date + gradient arrays to be
         passed out of BMI for backpropagation, loss, optimizer tuning.
         """
         raise NotImplementedError("tensor_to_array")
-    
+
     def get_tensor_slice(self):
         """Get tensor of input data for a single timestep."""
         # sample_dict = take_sample_test(self.bmi_config, self.dataset_dict)
         # self.input_tensor = torch.Tensor()
-    
+
         raise NotImplementedError("get_tensor_slice")
 
     def get_var_type(self, var_name):
@@ -710,7 +750,7 @@ class DeltaModelBmi(Bmi):
             Variable units.
         """
         # Combine input/output variable dicts: NOTE: should add to init.
-        return {**self._dynamic_var, **self._output_vars}[var_standard_name]['units']
+        return {**self._dynamic_var, **self._output_vars}[var_standard_name]["units"]
 
     def get_var_nbytes(self, var_name):
         """Get units of variable."""
@@ -748,13 +788,15 @@ class DeltaModelBmi(Bmi):
 
     def get_value_ptr(self, var_standard_name: str) -> np.ndarray:
         """Reference to values."""
-        return {**self._dynamic_var, **self._static_var, **self._output_vars}[var_standard_name]['value']
+        return {**self._dynamic_var, **self._static_var, **self._output_vars}[
+            var_standard_name
+        ]["value"]
 
     def get_value(self, var_name: str, dest: NDArray):
         """Return copy of variable values."""
         # TODO: will need to properly account for multiple basins.
         try:
-            dest[:] = self.get_value_ptr(var_name)[self._timestep-1,].flatten()
+            dest[:] = self.get_value_ptr(var_name)[self._timestep - 1,].flatten()
         except RuntimeError as e:
             raise e
         return dest
@@ -769,10 +811,11 @@ class DeltaModelBmi(Bmi):
         for dict in [self._dynamic_var, self._static_var, self._output_vars]:
             if var_name in dict.keys():
                 if self.stepwise:
-                    dict[var_name]['value'] = values
+                    dict[var_name]["value"] = values
                 else:
-                    dict[var_name]['value'] = np.append(
-                        dict[var_name]['value'], values,
+                    dict[var_name]["value"] = np.append(
+                        dict[var_name]["value"],
+                        values,
                     )
                 break
 
@@ -784,7 +827,7 @@ class DeltaModelBmi(Bmi):
         for dict in [self._dynamic_var, self._static_var, self._output_vars]:
             if name in dict.keys():
                 for i in inds:
-                    dict[name]['value'][i] = src[i]
+                    dict[name]["value"][i] = src[i]
                 break
 
     def get_component_name(self):
@@ -842,15 +885,15 @@ class DeltaModelBmi(Bmi):
 
     def get_current_time(self):
         """Current time of model."""
-        return self._timestep * self._att_map['time_step_size'] + self._start_time
+        return self._timestep * self._att_map["time_step_size"] + self._start_time
 
     def get_time_step(self):
         """Time step size of model."""
-        return self._att_map['time_step_size']
+        return self._att_map["time_step_size"]
 
     def get_time_units(self):
         """Time units of model."""
-        return self._att_map['time_units']
+        return self._att_map["time_units"]
 
     def get_grid_edge_count(self, grid):
         """Get grid edge count."""
@@ -898,13 +941,13 @@ class DeltaModelBmi(Bmi):
         dictionary object.
         """
         config_path = Path(config_path).resolve()
-        
+
         if not config_path:
             raise RuntimeError("No BMI configuration path provided.")
         elif not config_path.is_file():
             raise RuntimeError(f"BMI configuration not found at path {config_path}.")
         else:
-            with config_path.open('r') as f:
+            with config_path.open("r") as f:
                 self.config = yaml.safe_load(f)
 
     # def scale_output(self) -> None:

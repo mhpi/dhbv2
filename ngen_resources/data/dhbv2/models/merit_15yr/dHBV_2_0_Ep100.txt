@@ -1,3 +1,0 @@
-dHBV weights are too large (400MB) to store on GitHub, so this txt file is a placeholder.
-
-Link to download from S3/OneDrive will be added in time
