@@ -11,10 +11,9 @@ from bmi import DeltaModelBmi as Bmi
 
 ### Configuration Settings (Single-catchment Run) ###
 BASIN_ID = "cat-88306"
-BMI_CFG_PATH = f"bmi_config/bmi_config_{BASIN_ID}_5yr.yaml"
-
-FORC_PATH = f"data/aorc/juniata_river_basin/forcings_5yr_{BASIN_ID}.npy"
-ATTR_PATH = f"data/aorc/juniata_river_basin/attributes_5yr_{BASIN_ID}.npy"
+BMI_CFG_PATH = f"ngen_resources/data/dhbv2/config/bmi_{BASIN_ID}.yaml"
+FORC_PATH = f"ngen_resources/data/forcing/forcings_jrb_5yr_{BASIN_ID}.npy"
+ATTR_PATH = f"ngen_resources/data/forcing/attributes_jrb_5yr_{BASIN_ID}.npy"
 # OBS_PATH = f'../../data/aorc/juniata_river_basin/obs_5yr_{basin_id}.npy'
 ### ------------------------------------ ###
 
@@ -30,6 +29,7 @@ model = Bmi(config_path=bmi_cfg_path_full)
 
 streamflow_pred = np.zeros(forc.shape[0])
 nan_idx = []
+
 
 # # 1) Compile forcing data within BMI to do batch run.
 # for i in range(0, forc.shape[0]):

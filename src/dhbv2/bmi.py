@@ -212,10 +212,17 @@ class DeltaModelBmi(Bmi):
             self.stepwise = self.config_bmi.get("stepwise", True)
 
             try:
+                # model_config_path = os.path.join(
+                #     script_dir,
+                #     "..",
+                #     "..",
+                #     self.config_bmi.get('config_model'),
+                # )
                 model_config_path = os.path.join(
                     script_dir,
                     "..",
                     "..",
+                    "ngen_resources/data/dhbv2/",
                     self.config_bmi.get("config_model"),
                 )
                 with open(model_config_path) as f:

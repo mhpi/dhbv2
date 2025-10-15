@@ -1,5 +1,5 @@
 To use in the NextGen Framework,
-1) Copy the content of the dHBV 2.0 repo into `ngen/extern/dhbv_2_0/dhbv_2_0/`.
+1) Copy the content of the dHBV 2.0 repo into `ngen/extern/dhbv2/dhbv2/`.
 2) The contents of `ngen_resources/data/` should then be copied into the ngen repo at `ngen/data/`. This contains data for the model, realizations for NextGen, and other config files enabling the dHBV 2.0 package to be run from within NextGen.
 
 In particular, `ngen_resources/data/` contains:
