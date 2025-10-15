@@ -2,137 +2,139 @@
 # Yalan Song, Tadd Bindas, Chaopeng Shen, et al. High-resolution national-scale water modeling is enhanced by multiscale differentiable physics-informed machine learning. ESS Open Archive. 26 September 2024. https://doi.org/10.22541/essoar.172736277.74497104/v1.
 
 ## General -------------------------------#
-mode: predict
-random_seed: 111111
+mode: simulation  # train, test, train_test, sim
+do_tune: False  # python -m dmg +tune=true
+
+multimodel_type: none  # none, nn_parallel, nn_sequential
+seed: 111111
 device: cpu
 gpu_id: 0
+verbose: True
 
 data_loader: MsHydroLoader
 data_sampler: MsHydroSampler
 trainer: MsTrainer
 
 save_path: .
-trained_model: /models/hydrofabric_15yr/dhbv2_ep100.pt  # The trained dHBV 2.0 model (+ input data) can be downloaded from: https://pennstateoffice365-my.sharepoint.com/:f:/g/personal/cxs1024_psu_edu/Eqi1NuJ3d2pMpEJpVu0EGSoBigi-VCWVHgOYIRoTeuGiOw?e=HaNNeA
+trained_model: /models/hydrofabric_15yr/dhbv2_ep100.pt  # The trained dHBV 2.0 model (+ input data) can be downloaded from: https://mhpi-spatial.s3.us-east-2.amazonaws.com/mhpi-release/models/dHBV_2_0_trained.zip
 
 
 ## Training ------------------------------#
 train:
-    # NOTE: Multiscale training for dHBV2.0 is not currently enabled in dMG.
-    # Training code will be released at a later time.
-    start_time: 1980/10/01
-    end_time: 1995/09/30
-    target: [flow_sim]
-    optimizer: Adadelta
-    batch_size: 100
-    epochs: 100
-    start_epoch: 0
-    save_epoch: 5
+  # NOTE: Multiscale training for dHBV2.0 is not currently enabled in dMG.
+  # Training code will be released at a later time.
+  start_time: 1980/10/01
+  end_time: 1995/09/30
+  target: [streamflow]
+  optimizer:
+    name: Adadelta
+  lr: 1.0
+  lr_scheduler:
+    name: none
+  loss_function:
+    name: RmseCombLoss
+
+  batch_size: 100
+  epochs: 100
+  start_epoch: 0
+  save_epoch: 5
 
 
 ## Evaluation -------------------------------#
 test:
-    start_time: 1980/01/01
-    end_time: 2020/12/31
-    batch_size: 400
-    test_epoch: 100
+  start_time: 1980/01/01
+  end_time: 2020/12/31
+  batch_size: 25
+  test_epoch: 100
 
 
 ## Inference -------------------------------#
-predict:
-    start_time: 1980/01/01
-    end_time: 2020/12/31
-    batch_size: 400
+sim:
+  start_time: 1980/01/01
+  end_time: 2020/12/31
+  batch_size: 25
 
 
-## Loss Function -------------------------#
-loss_function:
-    model: RmseCombLoss
+## Differentiable Model -----------------------------#
+model:
+  rho: 365
 
+  phy_model:
+    ## Citations ##
+    # HBV 2.0: Yalan Song, Tadd Bindas, Chaopeng Shen, et al. High-resolution national-scale water modeling is enhanced by multiscale differentiable physics-informed machine learning. ESS Open Archive. September 26, 2024. https://doi.org/10.22541/essoar.172736277.74497104/v1.
 
-## dPL Model -----------------------------#
-dpl_model:
-    rho: 365
+    name: [Hbv_2]
+    nmul: 2
+    warm_up: 0
+    warm_up_states: True
+    dy_drop: 0.0
+    dynamic_params:
+      Hbv_2: [parBETA, parK0, parBETAET]
 
-    phy_model:
-        ## Citations ##
-        # HBV 2.0 (HBV_2_0): Yalan Song, Tadd Bindas, Chaopeng Shen, et al. High-resolution national-scale water modeling is enhanced by multiscale differentiable physics-informed machine learning. ESS Open Archive. September 26, 2024. https://doi.org/10.22541/essoar.172736277.74497104/v1.
+    routing: True
+    use_log_norm: []
+    nearzero: 1e-5
 
-        model: [HBV_2_0]
-        nmul: 2
-        warm_up: 0
-        warm_up_states: True
-        dy_drop: 0.0
-        dynamic_params:
-            HBV_2_0: [parBETA, parK0, parBETAET]
+    forcings: [
+      P,
+      Temp,
+      PET,
+    ]
+    attributes: []
 
-        routing: True
-        use_log_norm: []
-        nearzero: 1e-5
+  nn_model:
+    model: LstmMlpModel
 
-        forcings: [
-            P,
-            Temp,
-            PET,
-        ]
-        attributes: []
+    lstm_dropout: 0.5
+    lstm_hidden_size: 64
 
-    nn_model:
-        model: LstmMlpModel
+    mlp_dropout: 0.5
+    mlp_hidden_size: 4096
 
-        lstm_dropout: 0.5
-        lstm_hidden_size: 64
+    forcings: [
+      P,
+      Temp,
+      PET,
+    ]
+    attributes: [
+      aridity,
+      meanP,
+      ETPOT_Hargr,
+      NDVI,
+      FW,
+      meanslope,
+      SoilGrids1km_sand,
+      SoilGrids1km_clay,
+      SoilGrids1km_silt,
+      glaciers,
+      HWSD_clay,
+      HWSD_gravel,
+      HWSD_sand,
+      HWSD_silt,
+      meanelevation,
+      meanTa,
+      permafrost,
+      permeability,
+      seasonality_P,
+      seasonality_PET,
+      snow_fraction,
+      snowfall_fraction,
+      T_clay,
+      T_gravel,
+      T_sand,
+      T_silt,
+      Porosity,
+      uparea,
+    ]
 
-        mlp_dropout: 0.5
-        mlp_hidden_size: 4096
-
-        learning_rate: 1.0
-        lr_scheduler: None
-        lr_scheduler_params:
-            step_size: 10
-            gamma: 0.5
-
-        forcings: [
-            P,
-            Temp,
-            PET,
-        ]
-        attributes: [
-            aridity,
-            meanP,
-            ETPOT_Hargr,
-            NDVI,
-            FW,
-            meanslope,
-            SoilGrids1km_sand,
-            SoilGrids1km_clay,
-            SoilGrids1km_silt,
-            glaciers,
-            HWSD_clay,
-            HWSD_gravel,
-            HWSD_sand,
-            HWSD_silt,
-            meanelevation,
-            meanTa,
-            permafrost,
-            permeability,
-            seasonality_P,
-            seasonality_PET,
-            snow_fraction,
-            snowfall_fraction,
-            T_clay,
-            T_gravel,
-            T_sand,
-            T_silt,
-            Porosity,
-            uparea,
-        ]
-
-# NOTE: needed until either config init is ported from dMG, or this is dynamically added by the BMI.
-# Settings from data.yaml
+# NOTE: needed until either config init is ported from dMG, or this is
+# dynamically added by the BMI. (Necessary settings from data.yaml)
 observations:
-    name: merit_forward
-    start_time: 1980/01/01
-    end_time: 2020/12/31
+  name: hfv2.2_forward
+  start_time: 1980/01/01
+  end_time: 2020/12/31
 
-    upstream_area_name: uparea
-    elevation_name: meanelevation
+  subbasin_id_name: divide_id
+  upstream_area_name: uparea
+  subbasin_area_name: catchsize
+  elevation_name: meanelevation
