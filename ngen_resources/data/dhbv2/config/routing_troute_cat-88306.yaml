@@ -9,8 +9,8 @@ network_topology_parameters:
     #----------
     supernetwork_parameters:
         #----------
-        geo_file_path: ./extern/dhbv2/ngen_files/data/dhbv2/spatial/cat-88306.gpkg
-        columns: 
+        geo_file_path: ./extern/dhbv2/ngen_files/data/dhbv2/spatial/cat-88306_hfv2.2.gpkg
+        columns:
             key: 'id'
             downstream: 'to'
             dx : 'Length_m'
@@ -29,7 +29,7 @@ network_topology_parameters:
             mainstem: 'mainstem'
     waterbody_parameters:
         #----------
-        break_network_at_waterbodies: True  
+        break_network_at_waterbodies: True
 #--------------------------------------------------------------------------------
 compute_parameters:
     #----------
@@ -45,28 +45,28 @@ compute_parameters:
         lite_waterbody_restart_file : #restart/waterbody_restart_202006011200
     hybrid_parameters:
         run_hybrid_routing: False
-        diffusive_domain  : #domain/coastal_domain_subset.yaml  
+        diffusive_domain  : #domain/coastal_domain_subset.yaml
         use_natl_xsections: False
-        topobathy_domain  : #domain/final_diffusive_natural_xs.nc 
+        topobathy_domain  : #domain/final_diffusive_natural_xs.nc
         run_refactored_network: False
-        refactored_domain: #domain/refactored_coastal_domain_subset.yaml 
-        refactored_topobathy_domain: #domain/refac_final_diffusive_natural_xs.nc 
+        refactored_domain: #domain/refactored_coastal_domain_subset.yaml
+        refactored_topobathy_domain: #domain/refac_final_diffusive_natural_xs.nc
         coastal_boundary_domain: #domain/coastal_domain_crosswalk.yaml
     forcing_parameters:
         #----------
         qts_subdivisions            : 12
         dt                          : 86400  # [sec]
-        qlat_input_folder           : channel_forcing 
+        qlat_input_folder           : channel_forcing
         qlat_file_pattern_filter    : "*.CHRTOUT_DOMAIN1.csv"
-        coastal_boundary_input_file : # boundary_forcing  
+        coastal_boundary_input_file : # boundary_forcing
         nts                         : 365  # 288 for 1day; 2592 for 9 days
-        max_loop_size               : 8767  # [hr]  
+        max_loop_size               : 8767  # [hr]
     data_assimilation_parameters:
         #----------
         streamflow_da:
             #----------
             streamflow_nudging            : False
-            diffusive_streamflow_nudging  : False                               
+            diffusive_streamflow_nudging  : False
         reservoir_da:
             #----------
             reservoir_persistence_da:
@@ -84,8 +84,8 @@ output_parameters:
 #         #----------
 #         lite_restart_output_directory: restart/
 #     lakeout_output: lakeout/
-    stream_output : 
+    stream_output :
         stream_output_directory: output/
         stream_output_time: -1  #[hr]
         stream_output_type: '.nc'  #please select only between netcdf '.nc' or '.csv' or '.pkl'
-        stream_output_internal_frequency: 1440  #[min] it should be order of 5 minutes. For instance if you want to output every hour put 60    
+        stream_output_internal_frequency: 1440  #[min] it should be order of 5 minutes. For instance if you want to output every hour put 60
