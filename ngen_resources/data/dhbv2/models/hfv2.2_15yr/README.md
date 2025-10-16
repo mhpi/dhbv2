@@ -7,13 +7,13 @@ Original Authors: Scott Peckham, Jonathan Frame, et al.
 BMI requires a configuration file for each model. The dHBV 2.0 configuration files contains key value pairs that are used by the BMI to run the model. Below are examples and descriptions of each of such keys, and what type of values are associated.
 
 ## Initialization Information
-These key value pairs are used by the BMI to set up the model in some particular way  
+These key value pairs are used by the BMI to set up the model in some particular way
 - `train_config_file: ./models/hydrofabric_15yr/config.yaml`. This is an important part of the dHBV 2.0 model. This is a configuration file used when training the model. It has critical information on the dHBV 2.0 architecture and should not be altered.
 - `initial_state: 'zero'` This is an option to set the initial states of the model to zero.
 - `verbose: 0` Change to `1` in order to print additional BMI information during runtime.
 
 ## Static Attributes
-These are static attributes that are particular to the catchment. These should be calculated in the same manner as the values which the dHBV 2.0 was trained. Some description is provided below, but again see [Addor et al. 2017](https://doi.org/10.5194/hess-21-5293-2017) for more details. 
+These are static attributes that are particular to the catchment. These should be calculated in the same manner as the values which the dHBV 2.0 was trained. Some description is provided below, but again see [Addor et al. 2017](https://doi.org/10.5194/hess-21-5293-2017) for more details.
 - `area_sqkm: 620.38` allows bmi to adjust a weighted output
 - `elev_mean: 92.68` catchment mean elevation (m) above sea level
 - `slope_mean: 17.79072` catchment mean slope (m km−1)
@@ -43,9 +43,9 @@ These are static attributes that are particular to the catchment. These should b
 - `low_prec_dur: 3.66223` average duration of dry periods (number of consecutive days < 1mmday−1) (days)
 
 ### Optional Metadata
-These key value pairs contain metadata that are not required to run the model but can be useful to make sure that the model is running as expected.  It is best to consider items listed here as optional, but also as potential enhanced development looking ahead. 
-- `time_step: '1 hour'` As of this writing, both `time_step_size` and `time_units` are defined during `bmi.initialze()`.  The next phase of development will provide the model with all time information via bmi configuration. 
+These key value pairs contain metadata that are not required to run the model but can be useful to make sure that the model is running as expected.  It is best to consider items listed here as optional, but also as potential enhanced development looking ahead.
+- `time_step: '1 hour'` As of this writing, both `time_step_size` and `time_units` are defined during `bmi.initialze()`.  The next phase of development will provide the model with all time information via bmi configuration.
 - `basin_name: 'Narraguagus River at Cherryfield, Maine'` Not currently directly used but may be beneficial for bookkeeping.
-- `basin_id: '01022500'` Future development will require unique ID for node-to-node routing; still under beta 
+- `basin_id: '01022500'` Future development will require unique ID for node-to-node routing; still under beta
 - `lat: 44.60797` Post-run analysis or plotting only
 - `lon: -67.93524` Post-run analysis or plotting only

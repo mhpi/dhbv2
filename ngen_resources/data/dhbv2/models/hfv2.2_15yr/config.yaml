@@ -16,7 +16,7 @@ data_sampler: MsHydroSampler
 trainer: MsTrainer
 
 save_path: .
-trained_model: /models/hydrofabric_15yr/dhbv2_ep100.pt  # The trained dHBV 2.0 model (+ input data) can be downloaded from: https://mhpi-spatial.s3.us-east-2.amazonaws.com/mhpi-release/models/dHBV_2_0_trained.zip
+trained_model: /models/hfv2.2_15yr/dhbv2_ep100.pt  # The trained dHBV 2.0 model (+ input data) can be downloaded from: https://mhpi-spatial.s3.us-east-2.amazonaws.com/mhpi-release/models/dHBV_2_0_trained.zip
 
 
 ## Training ------------------------------#
