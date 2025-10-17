@@ -181,3 +181,6 @@ temp/
 tmp/
 *.tmp
 _version.py
+
+awi_forcings*
+dhbv_forcings*
