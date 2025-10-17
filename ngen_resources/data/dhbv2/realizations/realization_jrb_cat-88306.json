@@ -21,6 +21,9 @@
                 "fixed_time_step": false,
                 "uses_forcing_file": false,
                 "variables_names_map" : {
+                  "P": "atmosphere_water__liquid_equivalent_precipitation_rate",
+                  "Temp": "land_surface_air__temperature",
+                  "PET": "land_surface_water__potential_evaporation_volume_flux",
                   "streamflow_cms": "land_surface_water__runoff_volume_flux"
                 },
                 "model_params": {

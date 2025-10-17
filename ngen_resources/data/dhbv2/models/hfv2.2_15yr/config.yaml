@@ -16,7 +16,7 @@ data_sampler: MsHydroSampler
 trainer: MsTrainer
 
 save_path: .
-trained_model: /models/hfv2.2_15yr/dhbv2_ep100.pt  # The trained dHBV 2.0 model (+ input data) can be downloaded from: https://mhpi-spatial.s3.us-east-2.amazonaws.com/mhpi-release/models/dHBV_2_0_trained.zip
+model_dir: models/hfv2.2_15yr/dhbv_2_ep100.pt  # The trained dHBV 2.0 model (+ input data) can be downloaded from: https://mhpi-spatial.s3.us-east-2.amazonaws.com/mhpi-release/models/dHBV_2_0_trained.zip
 
 
 ## Training ------------------------------#
@@ -59,12 +59,12 @@ sim:
 model:
   rho: 365
 
-  phy_model:
+  phy:
     ## Citations ##
     # HBV 2.0: Yalan Song, Tadd Bindas, Chaopeng Shen, et al. High-resolution national-scale water modeling is enhanced by multiscale differentiable physics-informed machine learning. ESS Open Archive. September 26, 2024. https://doi.org/10.22541/essoar.172736277.74497104/v1.
 
     name: [Hbv_2]
-    nmul: 2
+    nmul: 4
     warm_up: 0
     warm_up_states: True
     dy_drop: 0.0
@@ -82,8 +82,8 @@ model:
     ]
     attributes: []
 
-  nn_model:
-    model: LstmMlpModel
+  nn:
+    name: LstmMlpModel
 
     lstm_dropout: 0.5
     lstm_hidden_size: 64

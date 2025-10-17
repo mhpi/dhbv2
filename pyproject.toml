@@ -10,8 +10,8 @@ description = "NextGen Compatible δHBV 2.0 model with UH routing."
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [
-    { name = "Leo Lonzarich" },
-    { name = "Yalan Song" },
+    { name = "Leo Lonzarich", email = "lglonzaric@gmail.com"},
+    { name = "Yalan Song", email= "songyalan1@gmail.com" },
 ]
 maintainers = [
     { name = "Leo Lonzarich", email = "lglonzaric@gmail.com" },
@@ -21,6 +21,7 @@ dynamic = ["version"]
 dependencies = [
     "bmipy",
     "dmg @ git+https://github.com/mhpi/generic_deltamodel.git@ngiab",
+    "hydrodl2 @ git+https://github.com/mhpi/hydrodl2.git@ngiab",
     "numpy~=1.0",
     "pandas >=1.1.5, <=2.2.0",
     "pre-commit",

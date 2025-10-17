@@ -8,16 +8,15 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Optional, Union, Any
+from typing import Optional, Union
 
 import numpy as np
 import torch
 import yaml
 from bmipy import Bmi
 from dmg.core.utils.factory import import_data_sampler
-from dmg.core.utils.dates import Dates
 
-from dmg import ModelHandler
+from dmg import ModelHandler, utils
 from numpy.typing import NDArray
 from sklearn.exceptions import DataDimensionalityWarning
 
@@ -115,7 +114,7 @@ _var_name_internal_map = {
     "Porosity": "soil_active-layer__porosity",
     "uparea": "basin__area",
     # ----------- Outputs -----------
-    "streamflow": "land_surface_water__runoff_volume_flux",
+    "flow_sim": "land_surface_water__runoff_volume_flux",
 }
 
 _var_name_external_map = {v: k for k, v in _var_name_internal_map.items()}
@@ -305,7 +304,6 @@ class DeltaModelBmi(Bmi):
                     script_dir,
                     "..",
                     "..",
-                    "ngen_resources/data/dhbv2/",
                     self.config_bmi.get("config_model"),
                 )
                 with open(model_config_path) as f:
@@ -313,13 +311,12 @@ class DeltaModelBmi(Bmi):
             except Exception as e:
                 raise RuntimeError(f"Failed to load model configuration: {e}") from e
 
-        self.config_model = self.initialize_config(self.config_model)
+        self.config_model = utils.initialize_config(self.config_model)
         self.config_model["model_path"] = os.path.join(
             script_dir,
             "..",
             "..",
-            "ngen_resources/data/dhbv2/",
-            self.config_model.get("model_dir"),
+            self.config_model.get("trained_model"),
         )
         self.device = self.config_model["device"]
         self.internal_dtype = self.config_model["dtype"]
@@ -366,8 +363,7 @@ class DeltaModelBmi(Bmi):
 
         # Forward model on individual timesteps if not initialized with forward_init.
         if self.stepwise:
-            data_dict = self._format_inputs()
-            predictions = self._do_forward(data_dict)
+            predictions = self._do_forward()
             self._format_outputs(predictions)
 
         # Increment model time.
@@ -437,8 +433,9 @@ class DeltaModelBmi(Bmi):
     # =========================================================================#
     # =========================================================================#
 
-    def _do_forward(self, data_dict: dict[str, Any]):
+    def _do_forward(self):
         """Forward model and save outputs to return on update call."""
+        data_dict = self._format_inputs()
         if data_dict == {}:
             log.error("No data to forward. Check input variables.")
             return
@@ -447,7 +444,7 @@ class DeltaModelBmi(Bmi):
         batch_start = np.arange(
             0,
             n_samples,
-            self.config_model["sim"]["batch_size"],
+            self.config_model["predict"]["batch_size"],
         )
         batch_end = np.append(batch_start[1:], n_samples)
 
@@ -465,7 +462,7 @@ class DeltaModelBmi(Bmi):
                 self.prediction = self._model.forward(dataset_sample, eval=True)
 
                 # For single hydrology model.
-                model_name = self.config_model["model"]["phy"]["name"][0]
+                model_name = self.config_model["dpl_model"]["phy_model"]["model"][0]
                 prediction = {
                     key: tensor.cpu().detach()
                     for key, tensor in self.prediction[model_name].items()
@@ -473,6 +470,12 @@ class DeltaModelBmi(Bmi):
                 batch_predictions.append(prediction)
 
         return self._batch_data(batch_predictions)
+
+        # preds = torch.cat([d['flow_sim'] for d in batched_preds_list], dim=1)
+        # preds = preds.numpy()
+
+        # # Scale and check output
+        # self.scale_output()
 
     @staticmethod
     def _load_trained_model(config: dict):
@@ -507,7 +510,7 @@ class DeltaModelBmi(Bmi):
             if outputs is None:
                 log.error("No outputs to format. Check model predictions.")
                 output_val = np.zeros(1)
-            elif not isinstance(outputs[internal_name], np.ndarray):
+            elif not isinstance(outputs["flow_sim"], np.ndarray):
                 output_val = outputs[internal_name].detach().cpu().numpy()
             else:
                 output_val = outputs[internal_name]
@@ -527,21 +530,19 @@ class DeltaModelBmi(Bmi):
         c_list = []
 
         for name, data in self._dynamic_var.items():
-            if data["value"].ndim == 0:
-                data["value"] = np.expand_dims(
-                    data["value"],
-                    axis=(0, 1),
-                )  # shape (1,1)
+            if data["value"].size == 0:
+                log.info(f"Dynamic variable '{name}' has no value.")
+                return {}
             if data["value"].ndim == 1:
                 data["value"] = np.expand_dims(
                     data["value"],
                     axis=(1, 2),
-                )  # Shape: (n, 1, 1) # TODO: Fix dims
+                )  # Shape: (n, 1, 1)
             elif data["value"].ndim == 2:
                 data["value"] = np.expand_dims(
                     data["value"],
                     axis=2,
-                )  # Shape: (n, m, 1) # TODO: Fix dims
+                )  # Shape: (n, m, 1)
             elif data["value"].ndim != 3:
                 raise ValueError(
                     f"Dynamic variable '{name}' has unsupported "
@@ -556,9 +557,9 @@ class DeltaModelBmi(Bmi):
                 data["value"] = np.expand_dims(data["value"], axis=(0, 1))
             c_list.append(data["value"])
 
-        x = np.concatenate(x_list, axis=2)  # Shape [nt, nb, nx]
+        x = np.concatenate(x_list, axis=2)
         x = self._fill_nan(x)
-        c = np.concatenate(c_list, axis=1)  # Shape [nb, nx_static]
+        c = np.concatenate(c_list, axis=1)
 
         xc_nn_norm, c_nn_norm = self.normalize(x.copy(), c)
 
@@ -578,6 +579,15 @@ class DeltaModelBmi(Bmi):
                 "Elevation is not provided. This is needed for high-resolution streamflow model.",
             ) from e
 
+        # Convert to torch tensors.
+        # dataset = {
+        #     'ac_all': torch.tensor(ac_array, dtype=torch.float32, device=self.device).squeeze(-1),
+        #     'elev_all': torch.tensor(elev_array, dtype=torch.float32, device=self.device).squeeze(-1),
+        #     'c_nn': torch.tensor(c, dtype=torch.float32, device=self.device),
+        #     'xc_nn_norm': torch.tensor(xc_nn_norm, dtype=torch.float32, device=self.device),
+        #     'c_nn_norm': torch.tensor(c_nn_norm, dtype=torch.float32, device=self.device),
+        #     'x_phy': torch.tensor(x, dtype=torch.float32, device=self.device),
+        # }
         dataset = {
             "ac_all": ac_array.squeeze(-1),
             "elev_all": elev_array.squeeze(-1),
@@ -620,7 +630,7 @@ class DeltaModelBmi(Bmi):
         vars: list[str],
     ) -> NDArray[np.float32]:
         """Standard data normalization."""
-        log_norm_vars = self.config_model["model"]["phy"]["use_log_norm"]
+        log_norm_vars = self.config_model["dpl_model"]["phy_model"]["use_log_norm"]
 
         data_norm = np.zeros(data.shape)
 
@@ -664,7 +674,7 @@ class DeltaModelBmi(Bmi):
         self,
         batch_list: list[dict[str, torch.Tensor]],
         target_key: str = None,
-    ) -> list[dict[str, np.ndarray]]:
+    ) -> None:
         """Merge list of batch data dictionaries into a single dictionary."""
         data = {}
         try:
@@ -680,6 +690,7 @@ class DeltaModelBmi(Bmi):
                     torch.cat([d[key] for d in batch_list], dim=dim).cpu().numpy()
                 )
             return data
+
         except ValueError as e:
             raise ValueError(f"Error concatenating batch data: {e}") from e
 
@@ -931,105 +942,20 @@ class DeltaModelBmi(Bmi):
         """Get grid z-coordinates."""
         raise NotImplementedError("get_grid_z")
 
-    def initialize_config(
-        self,
-        config: Union[dict, dict],
-    ) -> dict[str, Any]:
-        """Parse and initialize configuration settings.
-
-        Parameters
-        ----------
-        config
-            Configuration settings from Hydra.
-
-        Returns
-        -------
-        dict
-            Formatted configuration settings.
+    def initialize_config(self, config_path: str) -> dict:
         """
-        config["device"], config["dtype"] = self.set_system_spec(config)
-
-        # Convert date ranges to integer values.
-        train_time = Dates(config["train"], config["model"]["rho"])
-        test_time = Dates(config["test"], config["model"]["rho"])
-        sim_time = Dates(config["sim"], config["model"]["rho"])
-        all_time = Dates(config["observations"], config["model"]["rho"])
-
-        exp_time_start = min(
-            train_time.start_time,
-            train_time.end_time,
-            test_time.start_time,
-            test_time.end_time,
-        )
-        exp_time_end = max(
-            train_time.start_time,
-            train_time.end_time,
-            test_time.start_time,
-            test_time.end_time,
-        )
-
-        config["train_time"] = [train_time.start_time, train_time.end_time]
-        config["test_time"] = [test_time.start_time, test_time.end_time]
-        config["sim_time"] = [sim_time.start_time, sim_time.end_time]
-        config["experiment_time"] = [exp_time_start, exp_time_end]
-        config["all_time"] = [all_time.start_time, all_time.end_time]
-
-        if config.get("model_dir") is None:
-            config["model_dir"] = ""
-        config["plot_dir"] = ""
-        config["sim_dir"] = ""
-        config["log_dir"] = ""
-
-        # Convert string back to data type.
-        config["dtype"] = eval(config["dtype"])
-        config["model"]["phy"]["nearzero"] = float(config["model"]["phy"]["nearzero"])
-
-        # Raytune
-        config["do_tune"] = config.get("do_tune", False)
-
-        # Set batch size
-        if self.stepwise:
-            config["sim"]["batch_size"] = 1
-
-        return config
-
-    def set_system_spec(self, config: dict) -> tuple[str, str]:
-        """Set the device and data type for the model on user's system.
-
-        Parameters
-        ----------
-        cuda_devices
-            List of CUDA devices to use. If None, the first available device is used.
-
-        Returns
-        -------
-        tuple[str, str]
-            The device type and data type for the model.
+        Check that config_path is valid path and convert config into a
+        dictionary object.
         """
-        if config["device"] == "cpu":
-            device = torch.device("cpu")
-        elif config["device"] == "mps":
-            if torch.backends.mps.is_available():
-                device = torch.device("mps")
-            else:
-                raise ValueError("MPS is not available on this system.")
-        elif config["device"] == "cuda":
-            # Set the first device as the active device.
-            if (
-                torch.cuda.is_available()
-                and config["gpu_id"] < torch.cuda.device_count()
-            ):
-                device = torch.device(f"cuda:{config['gpu_id']}")
-                torch.cuda.set_device(device)
-            else:
-                raise ValueError(
-                    f"Selected CUDA device {config['gpu_id']} is not available.",
-                )
+        config_path = Path(config_path).resolve()
+
+        if not config_path:
+            raise RuntimeError("No BMI configuration path provided.")
+        elif not config_path.is_file():
+            raise RuntimeError(f"BMI configuration not found at path {config_path}.")
         else:
-            raise ValueError(f"Invalid device: {config['device']}")
-
-        dtype = torch.float32
-        return str(device), str(dtype)
+            with config_path.open("r") as f:
+                self.config = yaml.safe_load(f)
 
     # def scale_output(self) -> None:
     #     """
