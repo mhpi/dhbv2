@@ -8,14 +8,6 @@ from platformdirs import user_config_dir
 
 log = logging.getLogger('dhbv2')
 
-__all__ = [
-    '__version__',
-    'available_models',
-    'available_modules',
-    'load_model',
-    'load_module',
-]
-
 
 def _check_license_agreement():
     """Checks if user has agreed to package license and prompts if not."""
