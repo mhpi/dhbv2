@@ -133,7 +133,7 @@ def map_to_internal(name: str):
 
 def bmi_array(arr: list[float]) -> NDArray:
     """Trivial wrapper function to ensure the expected numpy array datatype is used."""
-    return np.array(arr, dtype="float64")
+    return np.array(arr, dtype='float64')
 
 
 # =============================================================================#
@@ -159,11 +159,11 @@ class DeltaModelBmi(Bmi):
     """
 
     _att_map = {
-        "model_name": "dHBV 2.0",
-        "version": "1.0",
-        "author_name": "Leo Lonzarich",
-        "time_step_size": 86400,
-        "time_units": "seconds",
+        'model_name': 'Differentiable Model',
+        'version': '1.0',
+        'author_name': 'Leo Lonzarich',
+        'time_step_size': 86400,
+        'time_units': 'seconds',
         # 'time_step_type':     '',
         # 'grid_type':          'scalar',
         # 'step_method':        '',
@@ -174,7 +174,7 @@ class DeltaModelBmi(Bmi):
         config_path: Optional[str] = None,
         verbose=False,
     ) -> None:
-        """Create a BMI dHBV 2.0UH model ready for initialization.
+        """Create a BMI model ready for initialization.
 
         Parameters
         ----------
@@ -184,17 +184,17 @@ class DeltaModelBmi(Bmi):
             Enables debug print statements if True.
         """
         super().__init__()
-        self._name = self._att_map["model_name"]
+        self._name = self._att_map['model_name']
         self._model = None
         self._initialized = False
         self.verbose = verbose
 
-        self._var_loc = "node"
+        self._var_loc = 'node'
         self._var_grid_id = 0
 
         self._start_time = 0.0
-        self._end_time = np.finfo("d").max
-        self._time_units = "s"
+        self._end_time = np.finfo('d').max
+        self._time_units = 's'
         self._timestep = 0
 
         self.config_bmi = None
@@ -210,7 +210,7 @@ class DeltaModelBmi(Bmi):
                 raise FileNotFoundError(f"Configuration file not found: {config_path}")
             with open(config_path) as f:
                 self.config_bmi = yaml.safe_load(f)
-            self.stepwise = self.config_bmi.get("stepwise", True)
+            self.stepwise = self.config_bmi.get('stepwise', True)
 
             try:
                 # model_config_path = os.path.join(
@@ -221,10 +221,10 @@ class DeltaModelBmi(Bmi):
                 # )
                 model_config_path = os.path.join(
                     script_dir,
-                    "..",
-                    "..",
-                    "ngen_resources/data/dhbv2/",
-                    self.config_bmi.get("config_model"),
+                    '..',
+                    '..',
+                    'ngen_resources/data/dhbv2/',
+                    self.config_bmi.get('config_model'),
                 )
                 with open(model_config_path) as f:
                     self.config_model = yaml.safe_load(f)
@@ -249,7 +249,7 @@ class DeltaModelBmi(Bmi):
         """Set the values of the given variables."""
         var_dict = {}
         for item in vars:
-            var_dict[item[0]] = {"value": var_value.copy(), "units": item[1]}
+            var_dict[item[0]] = {'value': var_value.copy(), 'units': item[1]}
         return var_dict
 
     def initialize(self, config_path: Optional[str] = None) -> None:
@@ -289,7 +289,7 @@ class DeltaModelBmi(Bmi):
                 raise FileNotFoundError(f"Configuration file not found: {config_path}")
             with open(config_path) as f:
                 self.config_bmi = yaml.safe_load(f)
-            self.stepwise = self.config_bmi.get("stepwise", True)
+            self.stepwise = self.config_bmi.get('stepwise', True)
 
         if self.config_bmi is None:
             raise ValueError(
@@ -303,10 +303,10 @@ class DeltaModelBmi(Bmi):
             try:
                 model_config_path = os.path.join(
                     script_dir,
-                    "..",
-                    "..",
-                    "ngen_resources/data/dhbv2/",
-                    self.config_bmi.get("config_model"),
+                    '..',
+                    '..',
+                    'ngen_resources/data/dhbv2/',
+                    self.config_bmi.get('config_model'),
                 )
                 with open(model_config_path) as f:
                     self.config_model = yaml.safe_load(f)
@@ -314,17 +314,18 @@ class DeltaModelBmi(Bmi):
                 raise RuntimeError(f"Failed to load model configuration: {e}") from e
 
         self.config_model = self.initialize_config(self.config_model)
-        self.config_model["model_path"] = os.path.join(
+        self.config_model['model_path'] = os.path.join(
             script_dir,
-            "..",
-            "..",
-            "ngen_resources/data/dhbv2/",
-            self.config_model.get("model_dir"),
+            '..',
+            '..',
+            'ngen_resources/data/dhbv2/',
+            self.config_model.get('model_dir'),
         )
-        self.device = self.config_model["device"]
-        self.internal_dtype = self.config_model["dtype"]
-        self.external_dtype = eval(self.config_bmi["dtype"])
-        self.sampler = import_data_sampler(self.config_model["data_sampler"])(
+        self._name = self.config_model['model']['phy']['name'][0]  # Overwrite
+        self.device = self.config_model['device']
+        self.internal_dtype = self.config_model['dtype']
+        self.external_dtype = eval(self.config_bmi['dtype'])
+        self.sampler = import_data_sampler(self.config_model['data_sampler'])(
             self.config_model,
         )
 
@@ -332,12 +333,12 @@ class DeltaModelBmi(Bmi):
         for name in self._static_var.keys():
             ext_name = map_to_internal(name)
             if ext_name in self.config_bmi.keys():
-                self._static_var[name]["value"] = bmi_array(self.config_bmi[ext_name])
+                self._static_var[name]['value'] = bmi_array(self.config_bmi[ext_name])
             else:
                 log.warning(f"Static variable '{name}' not in BMI config. Skipping.")
 
         # Set simulation parameters.
-        self.current_time = self.config_bmi.get("start_time", 0.0)
+        self.current_time = self.config_bmi.get('start_time', 0.0)
         # self._time_step_size = self.config_bmi.get('time_step_size', 86400)  # Default to 1 day in seconds.
         # self._end_time = self.config_bmi.get('end_time', np.finfo('d').max)\
 
@@ -443,11 +444,11 @@ class DeltaModelBmi(Bmi):
             log.error("No data to forward. Check input variables.")
             return
 
-        n_samples = data_dict["xc_nn_norm"].shape[1]
+        n_samples = data_dict['xc_nn_norm'].shape[1]
         batch_start = np.arange(
             0,
             n_samples,
-            self.config_model["sim"]["batch_size"],
+            self.config_model['sim']['batch_size'],
         )
         batch_end = np.append(batch_start[1:], n_samples)
 
@@ -461,14 +462,12 @@ class DeltaModelBmi(Bmi):
                     batch_end[i],
                 )
 
-                # Forward dPLHydro model
+                # Forward model
                 self.prediction = self._model.forward(dataset_sample, eval=True)
 
-                # For single hydrology model.
-                model_name = self.config_model["model"]["phy"]["name"][0]
                 prediction = {
                     key: tensor.cpu().detach()
-                    for key, tensor in self.prediction[model_name].items()
+                    for key, tensor in self.prediction[self._name].items()
                 }
                 batch_predictions.append(prediction)
 
@@ -477,7 +476,7 @@ class DeltaModelBmi(Bmi):
     @staticmethod
     def _load_trained_model(config: dict):
         """Load a pre-trained model based on the configuration."""
-        model_path = config.get("model_path")
+        model_path = config.get('model_path')
         if not model_path:
             raise ValueError("No model path specified in configuration.")
         if not Path(model_path).exists():
@@ -513,12 +512,12 @@ class DeltaModelBmi(Bmi):
                 output_val = outputs[internal_name]
 
             if self.stepwise:
-                self._output_vars[name]["value"] = np.append(
-                    self._output_vars[name]["value"],
+                self._output_vars[name]['value'] = np.append(
+                    self._output_vars[name]['value'],
                     output_val,
                 )
             else:
-                self._output_vars[name]["value"] = output_val
+                self._output_vars[name]['value'] = output_val
 
     def _format_inputs(self):
         """Format dynamic and static inputs for the model."""
@@ -527,34 +526,34 @@ class DeltaModelBmi(Bmi):
         c_list = []
 
         for name, data in self._dynamic_var.items():
-            if data["value"].ndim == 0:
-                data["value"] = np.expand_dims(
-                    data["value"],
+            if data['value'].ndim == 0:
+                data['value'] = np.expand_dims(
+                    data['value'],
                     axis=(0, 1),
                 )  # shape (1,1)
-            if data["value"].ndim == 1:
-                data["value"] = np.expand_dims(
-                    data["value"],
+            if data['value'].ndim == 1:
+                data['value'] = np.expand_dims(
+                    data['value'],
                     axis=(1, 2),
                 )  # Shape: (n, 1, 1) # TODO: Fix dims
-            elif data["value"].ndim == 2:
-                data["value"] = np.expand_dims(
-                    data["value"],
+            elif data['value'].ndim == 2:
+                data['value'] = np.expand_dims(
+                    data['value'],
                     axis=2,
                 )  # Shape: (n, m, 1) # TODO: Fix dims
-            elif data["value"].ndim != 3:
+            elif data['value'].ndim != 3:
                 raise ValueError(
                     f"Dynamic variable '{name}' has unsupported "
                     f"dimensions ({data['value'].ndim}).",
                 )
-            x_list.append(data["value"])
+            x_list.append(data['value'])
 
         for name, data in self._static_var.items():
-            if data["value"].size == 0:
+            if data['value'].size == 0:
                 raise ValueError(f"Static variable '{name}' has no value.")
-            if data["value"].ndim != 2:
-                data["value"] = np.expand_dims(data["value"], axis=(0, 1))
-            c_list.append(data["value"])
+            if data['value'].ndim != 2:
+                data['value'] = np.expand_dims(data['value'], axis=(0, 1))
+            c_list.append(data['value'])
 
         x = np.concatenate(x_list, axis=2)  # Shape [nt, nb, nx]
         x = self._fill_nan(x)
@@ -564,27 +563,27 @@ class DeltaModelBmi(Bmi):
 
         # Get upstream area and elevation
         try:
-            ac_name = self.config_model["observations"]["upstream_area_name"]
-            ac_array = self._static_var[map_to_external(ac_name)]["value"]
+            ac_name = self.config_model['observations']['upstream_area_name']
+            ac_array = self._static_var[map_to_external(ac_name)]['value']
         except ValueError as e:
             raise ValueError(
                 "Upstream area is not provided. This is needed for high-resolution streamflow model.",
             ) from e
         try:
-            elevation_name = self.config_model["observations"]["elevation_name"]
-            elev_array = self._static_var[map_to_external(elevation_name)]["value"]
+            elevation_name = self.config_model['observations']['elevation_name']
+            elev_array = self._static_var[map_to_external(elevation_name)]['value']
         except ValueError as e:
             raise ValueError(
                 "Elevation is not provided. This is needed for high-resolution streamflow model.",
             ) from e
 
         dataset = {
-            "ac_all": ac_array.squeeze(-1),
-            "elev_all": elev_array.squeeze(-1),
-            "c_nn": c,
-            "xc_nn_norm": xc_nn_norm,
-            "c_nn_norm": c_nn_norm,
-            "x_phy": x,
+            'ac_all': ac_array.squeeze(-1),
+            'elev_all': elev_array.squeeze(-1),
+            'c_nn': c,
+            'xc_nn_norm': xc_nn_norm,
+            'c_nn_norm': c_nn_norm,
+            'x_phy': x,
         }
         return dataset
         # =====================================================================#
@@ -620,7 +619,7 @@ class DeltaModelBmi(Bmi):
         vars: list[str],
     ) -> NDArray[np.float32]:
         """Standard data normalization."""
-        log_norm_vars = self.config_model["model"]["phy"]["use_log_norm"]
+        log_norm_vars = self.config_model['model']['phy']['use_log_norm']
 
         data_norm = np.zeros(data.shape)
 
@@ -642,9 +641,9 @@ class DeltaModelBmi(Bmi):
     def load_norm_stats(self) -> None:
         """Load normalization statistics."""
         path = os.path.join(
-            self.config_model["model_path"],
-            "..",
-            "normalization_statistics.json",
+            self.config_model['model_path'],
+            '..',
+            'normalization_statistics.json',
         )
         try:
             with open(os.path.abspath(path)) as f:
@@ -656,7 +655,7 @@ class DeltaModelBmi(Bmi):
         """Process model predictions and store them in output variables."""
         for var_name, prediction in predictions.items():
             if var_name in self._output_vars:
-                self._output_vars[var_name]["value"] = prediction.cpu().numpy()
+                self._output_vars[var_name]['value'] = prediction.cpu().numpy()
             else:
                 log.warning(f"Output variable '{var_name}' not recognized. Skipping.")
 
@@ -712,21 +711,21 @@ class DeltaModelBmi(Bmi):
 
     def array_to_tensor(self) -> None:
         """Converts input values into Torch tensor object to be read by model."""
-        raise NotImplementedError("array_to_tensor")
+        raise NotImplementedError('array_to_tensor')
 
     def tensor_to_array(self) -> None:
         """
         Converts model output Torch tensor into date + gradient arrays to be
         passed out of BMI for backpropagation, loss, optimizer tuning.
         """
-        raise NotImplementedError("tensor_to_array")
+        raise NotImplementedError('tensor_to_array')
 
     def get_tensor_slice(self):
         """Get tensor of input data for a single timestep."""
         # sample_dict = take_sample_test(self.bmi_config, self.dataset_dict)
         # self.input_tensor = torch.Tensor()
 
-        raise NotImplementedError("get_tensor_slice")
+        raise NotImplementedError('get_tensor_slice')
 
     def get_var_type(self, var_name):
         """Data type of variable."""
@@ -746,7 +745,7 @@ class DeltaModelBmi(Bmi):
             Variable units.
         """
         # Combine input/output variable dicts: NOTE: should add to init.
-        return {**self._dynamic_var, **self._output_vars}[var_standard_name]["units"]
+        return {**self._dynamic_var, **self._output_vars}[var_standard_name]['units']
 
     def get_var_nbytes(self, var_name):
         """Get units of variable."""
@@ -807,10 +806,10 @@ class DeltaModelBmi(Bmi):
         for dict in [self._dynamic_var, self._static_var, self._output_vars]:
             if var_name in dict.keys():
                 if self.stepwise:
-                    dict[var_name]["value"] = values
+                    dict[var_name]['value'] = values
                 else:
-                    dict[var_name]["value"] = np.append(
-                        dict[var_name]["value"],
+                    dict[var_name]['value'] = np.append(
+                        dict[var_name]['value'],
                         values,
                     )
                 break
@@ -823,7 +822,7 @@ class DeltaModelBmi(Bmi):
         for dict in [self._dynamic_var, self._static_var, self._output_vars]:
             if name in dict.keys():
                 for i in inds:
-                    dict[name]["value"][i] = src[i]
+                    dict[name]['value'][i] = src[i]
                 break
 
     def get_component_name(self):
@@ -851,24 +850,24 @@ class DeltaModelBmi(Bmi):
         # var_name = self._grids[grid_id][0]
         # shape[:] = self.get_value_ptr(var_name).shape
         # return shape
-        raise NotImplementedError("get_grid_shape")
+        raise NotImplementedError('get_grid_shape')
 
     def get_grid_spacing(self, grid_id, spacing):
         """Spacing of rows and columns of uniform rectilinear grid."""
         # spacing[:] = self._model.spacing
         # return spacing
-        raise NotImplementedError("get_grid_spacing")
+        raise NotImplementedError('get_grid_spacing')
 
     def get_grid_origin(self, grid_id, origin):
         """Origin of uniform rectilinear grid."""
         # origin[:] = self._model.origin
         # return origin
-        raise NotImplementedError("get_grid_origin")
+        raise NotImplementedError('get_grid_origin')
 
     def get_grid_type(self, grid_id):
         """Type of grid."""
         if grid_id == 0:
-            return "scalar"
+            return 'scalar'
         raise RuntimeError(f"unsupported grid type: {grid_id!s}. only support 0")
 
     def get_start_time(self):
@@ -881,55 +880,55 @@ class DeltaModelBmi(Bmi):
 
     def get_current_time(self):
         """Current time of model."""
-        return self._timestep * self._att_map["time_step_size"] + self._start_time
+        return self._timestep * self._att_map['time_step_size'] + self._start_time
 
     def get_time_step(self):
         """Time step size of model."""
-        return self._att_map["time_step_size"]
+        return self._att_map['time_step_size']
 
     def get_time_units(self):
         """Time units of model."""
-        return self._att_map["time_units"]
+        return self._att_map['time_units']
 
     def get_grid_edge_count(self, grid):
         """Get grid edge count."""
-        raise NotImplementedError("get_grid_edge_count")
+        raise NotImplementedError('get_grid_edge_count')
 
     def get_grid_edge_nodes(self, grid, edge_nodes):
         """Get grid edge nodes."""
-        raise NotImplementedError("get_grid_edge_nodes")
+        raise NotImplementedError('get_grid_edge_nodes')
 
     def get_grid_face_count(self, grid):
         """Get grid face count."""
-        raise NotImplementedError("get_grid_face_count")
+        raise NotImplementedError('get_grid_face_count')
 
     def get_grid_face_nodes(self, grid, face_nodes):
         """Get grid face nodes."""
-        raise NotImplementedError("get_grid_face_nodes")
+        raise NotImplementedError('get_grid_face_nodes')
 
     def get_grid_node_count(self, grid):
         """Get grid node count."""
-        raise NotImplementedError("get_grid_node_count")
+        raise NotImplementedError('get_grid_node_count')
 
     def get_grid_nodes_per_face(self, grid, nodes_per_face):
         """Get grid nodes per face."""
-        raise NotImplementedError("get_grid_nodes_per_face")
+        raise NotImplementedError('get_grid_nodes_per_face')
 
     def get_grid_face_edges(self, grid, face_edges):
         """Get grid face edges."""
-        raise NotImplementedError("get_grid_face_edges")
+        raise NotImplementedError('get_grid_face_edges')
 
     def get_grid_x(self, grid, x):
         """Get grid x-coordinates."""
-        raise NotImplementedError("get_grid_x")
+        raise NotImplementedError('get_grid_x')
 
     def get_grid_y(self, grid, y):
         """Get grid y-coordinates."""
-        raise NotImplementedError("get_grid_y")
+        raise NotImplementedError('get_grid_y')
 
     def get_grid_z(self, grid, z):
         """Get grid z-coordinates."""
-        raise NotImplementedError("get_grid_z")
+        raise NotImplementedError('get_grid_z')
 
     def initialize_config(
         self,
@@ -947,13 +946,13 @@ class DeltaModelBmi(Bmi):
         dict
             Formatted configuration settings.
         """
-        config["device"], config["dtype"] = self.set_system_spec(config)
+        config['device'], config['dtype'] = self.set_system_spec(config)
 
         # Convert date ranges to integer values.
-        train_time = Dates(config["train"], config["model"]["rho"])
-        test_time = Dates(config["test"], config["model"]["rho"])
-        sim_time = Dates(config["sim"], config["model"]["rho"])
-        all_time = Dates(config["observations"], config["model"]["rho"])
+        train_time = Dates(config['train'], config['model']['rho'])
+        test_time = Dates(config['test'], config['model']['rho'])
+        sim_time = Dates(config['sim'], config['model']['rho'])
+        all_time = Dates(config['observations'], config['model']['rho'])
 
         exp_time_start = min(
             train_time.start_time,
@@ -968,28 +967,28 @@ class DeltaModelBmi(Bmi):
             test_time.end_time,
         )
 
-        config["train_time"] = [train_time.start_time, train_time.end_time]
-        config["test_time"] = [test_time.start_time, test_time.end_time]
-        config["sim_time"] = [sim_time.start_time, sim_time.end_time]
-        config["experiment_time"] = [exp_time_start, exp_time_end]
-        config["all_time"] = [all_time.start_time, all_time.end_time]
+        config['train_time'] = [train_time.start_time, train_time.end_time]
+        config['test_time'] = [test_time.start_time, test_time.end_time]
+        config['sim_time'] = [sim_time.start_time, sim_time.end_time]
+        config['experiment_time'] = [exp_time_start, exp_time_end]
+        config['all_time'] = [all_time.start_time, all_time.end_time]
 
-        if config.get("model_dir") is None:
-            config["model_dir"] = ""
-        config["plot_dir"] = ""
-        config["sim_dir"] = ""
-        config["log_dir"] = ""
+        if config.get('model_dir') is None:
+            config['model_dir'] = ''
+        config['plot_dir'] = ''
+        config['sim_dir'] = ''
+        config['log_dir'] = ''
 
         # Convert string back to data type.
-        config["dtype"] = eval(config["dtype"])
-        config["model"]["phy"]["nearzero"] = float(config["model"]["phy"]["nearzero"])
+        config['dtype'] = eval(config['dtype'])
+        config['model']['phy']['nearzero'] = float(config['model']['phy']['nearzero'])
 
         # Raytune
-        config["do_tune"] = config.get("do_tune", False)
+        config['do_tune'] = config.get('do_tune', False)
 
         # Set batch size
         if self.stepwise:
-            config["sim"]["batch_size"] = 1
+            config['sim']['batch_size'] = 1
 
         return config
 
@@ -1006,14 +1005,14 @@ class DeltaModelBmi(Bmi):
         tuple[str, str]
             The device type and data type for the model.
         """
-        if config["device"] == "cpu":
-            device = torch.device("cpu")
-        elif config["device"] == "mps":
+        if config["device"] == 'cpu':
+            device = torch.device('cpu')
+        elif config['device'] == 'mps':
             if torch.backends.mps.is_available():
-                device = torch.device("mps")
+                device = torch.device('mps')
             else:
                 raise ValueError("MPS is not available on this system.")
-        elif config["device"] == "cuda":
+        elif config["device"] == 'cuda':
             # Set the first device as the active device.
             if (
                 torch.cuda.is_available()
