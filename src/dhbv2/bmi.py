@@ -200,6 +200,11 @@ class DeltaModelBmi(Bmi):
         self.config_bmi = None
         self.config_model = None
 
+        # Model states:
+        self.hn = None  # LSTM hidden state
+        self.cn = None  # LSTM cell state
+        self.pstate = None  # Physical model states (e.g., buckets)
+
         # Timing BMI computations
         t_start = time.time()
         self.bmi_process_time = 0
@@ -462,8 +467,14 @@ class DeltaModelBmi(Bmi):
                     batch_end[i],
                 )
 
-                # Forward model
+                # 1. Load model states
+                self._model.load_states((self.hn, self.cn), self.pstate)
+
+                # 2. Forward model
                 self.prediction = self._model.forward(dataset_sample, eval=True)
+
+                # 3. Cache model states
+                self.hn, self.cn, self.pstate = self._model.get_states()
 
                 prediction = {
                     key: tensor.cpu().detach()
