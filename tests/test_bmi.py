@@ -3,22 +3,25 @@
 Authors: Jessica Garrett, Jonathan Frame | Leo Lonzarich (Adapted)
 """
 
-import os
 from pathlib import Path
 
 import pytest
 import numpy as np
 
-# Import your BMI class
-import bmi  # Adjust if needed (e.g., from your_package import bmi)
+from dhbv2.bmi import DeltaModelBmi as bmi
 
 
 # --- Fixtures ---
 
+
 @pytest.fixture(scope="module")
 def cfg_file():
     """Path to the BMI config file."""
-    config_path = Path(__file__).parent.parent.parent / "bmi_config_files" / "bmi_config_cat-88306_5yr.yaml"
+    config_path = (
+        Path(__file__).parent.parent.parent
+        / "bmi_config_files"
+        / "bmi_config_cat-88306_5yr.yaml"
+    )
     if not config_path.exists():
         pytest.skip(f"Configuration file not found: {config_path}")
     return str(config_path)
@@ -34,11 +37,12 @@ def bmi_model(cfg_file):
     # Finalize after all tests
     try:
         model.finalize()
-    except Exception:
+    except RuntimeError:
         pass  # Ignore errors during finalize in teardown
 
 
 # --- Helper Fixtures ---
+
 
 @pytest.fixture
 def all_var_names(bmi_model):
@@ -46,6 +50,7 @@ def all_var_names(bmi_model):
 
 
 # --- Tests: Model Information ---
+
 
 def test_initialize(bmi_model):
     # initialize() is called in fixture; just verify it worked
@@ -85,6 +90,7 @@ def test_get_output_var_names(bmi_model):
 
 
 # --- Tests: Variable Information (parametrized over all variables) ---
+
 
 @pytest.mark.parametrize("var_name", lambda: pytest.lazy_fixture("all_var_names"))
 def test_get_var_units(bmi_model, var_name):
@@ -127,6 +133,7 @@ def test_get_var_location(bmi_model, var_name):
 
 # --- Tests: Time Functions ---
 
+
 def test_get_start_time(bmi_model):
     start = bmi_model.get_start_time()
     assert isinstance(start, (int, float))
@@ -157,6 +164,7 @@ def test_get_time_units(bmi_model):
 
 # --- Tests: Grid Functions ---
 
+
 def test_grid_functions(bmi_model):
     grid_id = 0  # assumed single grid
     rank = bmi_model.get_grid_rank(grid_id)
@@ -169,6 +177,7 @@ def test_grid_functions(bmi_model):
 
 
 # --- Tests: Get/Set Values (parametrized) ---
+
 
 @pytest.mark.parametrize("var_name", lambda: pytest.lazy_fixture("all_var_names"))
 def test_set_get_value(bmi_model, var_name):
@@ -207,6 +216,7 @@ def test_set_get_value_at_indices(bmi_model, var_name):
 
 
 # --- Tests: Control Functions ---
+
 
 def test_update(bmi_model):
     initial_time = bmi_model.get_current_time()
