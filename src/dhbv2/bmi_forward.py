@@ -11,10 +11,10 @@ from dhbv2.bmi import DeltaModelBmi as Bmi
 from netCDF4 import Dataset
 
 ### Configuration Settings (single-catchment) ###
-BASIN_ID = "cat-88306"
+BASIN_ID = 'cat-88306'
 CAT_IDX = 0
-BMI_CONFIG_PATH = f"ngen_resources/data/dhbv2/config/bmi_{BASIN_ID}.yaml"
-FORC_PATH = "ngen_resources/data/forcing/dhbv_forcings.nc"
+BMI_CONFIG_PATH = f'ngen_resources/data/dhbv2/config/bmi_{BASIN_ID}.yaml'
+FORC_PATH = 'ngen_resources/data/forcing/dhbv_forcings.nc'
 ### ------------------------------------ ###
 
 
@@ -42,24 +42,26 @@ def execute():
         "[Looping through timesteps | Setting forcing/attribute values & forwarding model]",
     )
     f_dict = {}
-    t_steps = forcing_data["Time"][:].shape[-1]
+    t_steps = forcing_data['Time'][:].shape[-1]
 
     for key in forcing_data.variables.keys():
-        if key in ["P", "Temp", "PET"]:
+        if key in ['P', 'Temp', 'PET']:
             f_dict[key] = forcing_data[key][CAT_IDX, :]
+
+    f_dict['P'] = f_dict['P'] * 1000
 
     for t in range(t_steps):
         print(f"\n--- Timestep {t + 1}/{t_steps} ---")
 
         # Forcings
         model.set_value(
-            "atmosphere_water__liquid_equivalent_precipitation_rate",
-            f_dict["P"][t],
+            'atmosphere_water__liquid_equivalent_precipitation_rate',
+            f_dict['P'][t],
         )
-        model.set_value("land_surface_air__temperature", f_dict["Temp"][t])
+        model.set_value('land_surface_air__temperature', f_dict['Temp'][t])
         model.set_value(
-            "land_surface_water__potential_evaporation_volume_flux",
-            f_dict["PET"][t],
+            'land_surface_water__potential_evaporation_volume_flux',
+            f_dict['PET'][t],
         )
 
         ### BMI update ###
@@ -67,7 +69,7 @@ def execute():
         model.update()
 
         dest_array = np.zeros(1)
-        model.get_value("land_surface_water__runoff_volume_flux", dest_array)
+        model.get_value('land_surface_water__runoff_volume_flux', dest_array)
         runoff = dest_array[0]
 
         print(
@@ -83,5 +85,5 @@ def execute():
     model.finalize()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     execute()

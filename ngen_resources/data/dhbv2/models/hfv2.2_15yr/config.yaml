@@ -74,6 +74,7 @@ model:
     routing: True
     use_log_norm: []
     nearzero: 1e-5
+    cache_states: True
 
     forcings: [
       P,

@@ -246,6 +246,10 @@ class DeltaModelBmi(Bmi):
         if self.verbose:
             log.info(f"BMI init took {time.time() - t_start} s")
 
+        self.x_list = []
+        self.xc_nn_list = []
+        self.c_nn_list = []
+
     @staticmethod
     def _set_vars(
         vars: list[tuple[str, str]],
@@ -389,7 +393,7 @@ class DeltaModelBmi(Bmi):
     def update_until(self, end_time: float) -> None:
         """(Control function) Update model until a particular time.
 
-        Note: Models should be trained standalone with dPLHydro_PMI first before
+        Note: Models should be trained standalone with dmg first before
         forward predictions with this BMI.
 
         Parameters
@@ -472,15 +476,33 @@ class DeltaModelBmi(Bmi):
 
                 # 2. Forward model
                 self.prediction = self._model.forward(dataset_sample, eval=True)
-
+                print(dataset_sample['x_phy'])
+                print(self.prediction)
                 # 3. Cache model states
-                self.hn, self.cn, self.pstate = self._model.get_states()
+                (self.hn, self.cn), self.pstate = self._model.get_states()
+                print(self.pstate)
 
                 prediction = {
                     key: tensor.cpu().detach()
                     for key, tensor in self.prediction[self._name].items()
                 }
                 batch_predictions.append(prediction)
+
+                self.x_list.append(dataset_sample['x_phy'])
+                self.xc_nn_list.append(dataset_sample['xc_nn_norm'])
+                self.c_nn_list.append(dataset_sample['c_nn_norm'])
+
+        # Combine batches
+        # x_combined = torch.cat(self.x_list, dim=0)
+        # xc_nn_combined = torch.cat(self.xc_nn_list, dim=0)
+        # c_nn_combined = torch.cat(self.c_nn_list, dim=0)
+
+        # data_dict['x_phy'] = x_combined.numpy()
+        # data_dict['xc_nn_norm'] = xc_nn_combined.numpy()
+        # data_dict['c_nn_norm'] = c_nn_combined.numpy()
+
+        # self.prediction = self._model.forward(dataset_sample, eval=True)
+        # print(self.prediction)
 
         return self._batch_data(batch_predictions)
 
@@ -598,6 +620,10 @@ class DeltaModelBmi(Bmi):
         }
         return dataset
         # =====================================================================#
+
+    def _time_conversion(self):
+        """Convert time units if necessary."""
+        pass
 
     def normalize(
         self,
