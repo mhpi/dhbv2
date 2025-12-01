@@ -45,9 +45,6 @@ dev = [
     "pytest",
     "ruff",
 ]
-hydrodl2 = [
-    "hydrodl2 @ git+https://github.com/mhpi/hydrodl2.git@master"
-]
 cuda = [
     "cupy-cuda12x",
 ]
