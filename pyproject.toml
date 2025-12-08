@@ -4,24 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dhbv2"
-description = "NextGen-compatible hourly δHBV 2.0 rainfall-runoff model."
+description = "NextGen Compatible δHBV 2.0 model with UH routing."
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [
     { name = "Leo Lonzarich", email = "lglonzaric@gmail.com"},
-    { name = "Wencong Yang", email = "yangwconion@gmail.com" },
-    { name = "Haoyu Ji", email = "hiyuji98@github.com" },
     { name = "Yalan Song", email= "songyalan1@gmail.com" },
 ]
 maintainers = [
     { name = "Leo Lonzarich", email = "lglonzaric@gmail.com" },
-    { name = "Yalan Song", email= "songyalan1@gmail.com" },
 ]
 requires-python = ">=3.9.0"
 dynamic = ["version"]
 dependencies = [
     "bmipy",
-    "dmg @ git+https://github.com/mhpi/generic_deltamodel.git@master",
+    "dmg @ git+https://github.com/mhpi/generic_deltamodel.git@ngiab",
     "hydrodl2 @ git+https://github.com/mhpi/hydrodl2.git@master",
     "numpy~=1.0",
     "pandas",
@@ -52,6 +49,9 @@ cuda = [
     "cupy-cuda12x",
 ]
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 xfail_strict = true
@@ -74,7 +74,7 @@ lint.select = [
     "BLE",  # flake8-blind-except
     "UP",  # pyupgrade
     "RUF100",  # Report unused noqa directives
-    "COM812",  # Missing trailing comma
+    # "COM812",  # Missing trailing comma
 ]
 exclude = [
     ".git",
@@ -112,7 +112,7 @@ lint.ignore = [
     # Disable checks on | operator notation in type hints
     "UP007",
     # Use `X | None` for type annotations
-    "UP045",
+    "UP045"
 ]
 
 [tool.ruff.lint.pydocstyle]

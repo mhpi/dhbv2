@@ -1,0 +1,52 @@
+# Config for Ngen-integrated differentiable river routing with DDR.
+# (https://github.com/taddyb/ddr)
+#--------------------------------------------------------------------------------
+log_parameters:
+    #----------
+    showtiming: True
+    log_level : DEBUG
+#--------------------------------------------------------------------------------
+network_topology_parameters:
+    #----------
+    supernetwork_parameters:
+        #----------
+        geo_file_path: ./data/dhbv2/spatial/jrb_hfv2.2.gpkg
+        columns:
+            key: 'divide_id'
+            downstream: 'to'
+            length : 'Length_m'
+            slope : 'So'
+            top_width : 'TopWidth'
+            side_slope : 'ChSlp'
+            x : 'MusX'
+            mean_impervious : 'mean.impervious'
+            mean_elevation: 'mean.elevation'
+            smcmax: 'mean.smcmax_soil_layers_stag=1'
+#--------------------------------------------------------------------------------
+compute_parameters:
+    #----------
+    assume_short_ts        : True
+    cpu_pool               : 1
+    restart_parameters:
+        #----------
+        start_datetime              : 2000-01-01_00:00:00
+    hybrid_parameters:
+        network: #./data/ddr/spatial/network.zarr
+        transition_matrix: #./data/ddr/spatial/conus_transition_matrices.zarr
+        statistics: #./data/ddr/spatial/attribute_statistics_hydrofabric_v2.2.json
+    forcing_parameters:
+        #----------
+        qts_subdivisions            : 1
+        dt                          : 86400  # [sec]
+        qlat_input_folder           : ngen_output
+        qlat_file_pattern_filter    : "*.csv"
+        nts                         : 157680000  # [sec]  # 5 years of data
+        max_loop_size               : 1261440000  # [sec]  # 40 years of data
+#--------------------------------------------------------------------------------
+output_parameters:
+    #----------
+    stream_output :
+      stream_output_directory         : ngen_output/routed/
+      stream_output_time              : -1  # [sec]
+      stream_output_type              : '.nc'  # nc, csv, or pkl
+      stream_output_internal_frequency: 86400  # [sec]

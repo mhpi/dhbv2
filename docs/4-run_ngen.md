@@ -1,3 +1,0 @@
-# Run δHBV2.0 in NextGen Framework
-
-...

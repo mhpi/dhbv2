@@ -12,17 +12,20 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest]
-        python-version: ['3.9', '3.12', '3.13']
+        python-version: ['3.12', '3.13']
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6.0.1
+        uses: actions/checkout@v5.0.0
 
       - name: Install uv + Python
-        uses: astral-sh/setup-uv@v7.1.5
+        uses: astral-sh/setup-uv@v7.1.0
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
+
+      # - name: Install dependencies
+      #   run: uv sync --extra dev --extra hydrodl2
 
       - name: Run Ruff check
         run: uv run ruff check . --config pyproject.toml --output-format=github

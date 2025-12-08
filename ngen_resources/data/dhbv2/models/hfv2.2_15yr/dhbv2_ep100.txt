@@ -1,0 +1,3 @@
+dHBV weights are too large (400MB) to store on GitHub, so this txt file is a placeholder.
+
+Download from [S3](https://mhpi-spatial.s3.us-east-2.amazonaws.com/mhpi-release/models/dHBV_2_0_trained.zip)

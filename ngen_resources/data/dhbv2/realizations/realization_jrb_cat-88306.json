@@ -1,0 +1,160 @@
+{
+  "global": {
+    "formulations": [
+      {
+        "name": "bmi_multi",
+        "params": {
+          "model_type_name": "dhbv2",
+          "forcing_file": "",
+          "init_config": "",
+          "allow_exceed_end_time": true,
+          "main_output_variable": "land_surface_water__runoff_volume_flux",
+          "modules": [
+            {
+              "name": "bmi_python",
+              "params": {
+                "python_type": "dhbv2.bmi.DeltaModelBmi",
+                "model_type_name": "DeltaModelBmi",
+                "init_config": "./data/dhbv2/config/bmi_cat-88306.yml",
+                "allow_exceed_end_time": true,
+                "main_output_variable": "land_surface_water__runoff_volume_flux",
+                "fixed_time_step": false,
+                "uses_forcing_file": false,
+                "variables_names_map" : {
+                  "P": "atmosphere_water__liquid_equivalent_precipitation_rate",
+                  "Temp": "land_surface_air__temperature",
+                  "PET": "land_surface_water__potential_evaporation_volume_flux",
+                  "streamflow_cms": "land_surface_water__runoff_volume_flux"
+                },
+                "model_params": {
+                  "aridity": {
+                    "source": "hydrofabric",
+                    "from": "ratio__mean_potential_evapotranspiration__mean_precipitation"
+                  },
+                  "meanP": {
+                    "source": "hydrofabric",
+                    "from": "atmosphere_water__daily_mean_of_liquid_equivalent_precipitation_rate"
+                  },
+                  "ETPOT_Hargr": {
+                    "source": "hydrofabric",
+                    "from": "land_surface_water__Hargreaves_potential_evaporation_volume_flux"
+                  },
+                  "NDVI": {
+                    "source": "hydrofabric",
+                    "from": "land_vegetation__normalized_diff_vegetation_index"
+                  },
+                  "FW": {
+                    "source": "hydrofabric",
+                    "from": "free_land_surface_water"
+                  },
+                  "meanslope": {
+                    "source": "hydrofabric",
+                    "from": "basin__mean_of_slope"
+                  },
+                  "SoilGrids1km_sand": {
+                    "source": "hydrofabric",
+                    "from": "soil_sand__grid"
+                  },
+                  "SoilGrids1km_clay": {
+                    "source": "hydrofabric",
+                    "from": "soil_clay__grid"
+                  },
+                  "SoilGrids1km_silt": {
+                    "source": "hydrofabric",
+                    "from": "soil_silt__grid"
+                  },
+                  "glaciers": {
+                    "source": "hydrofabric",
+                    "from": "land_surface_water__glacier_fraction"
+                  },
+                  "HWSD_clay": {
+                    "source": "hydrofabric",
+                    "from": "soil_clay__attr"
+                  },
+                  "HWSD_gravel": {
+                    "source": "hydrofabric",
+                    "from": "soil_gravel__attr"
+                  },
+                  "HWSD_sand": {
+                    "source": "hydrofabric",
+                    "from": "soil_sand__attr"
+                  },
+                  "HWSD_silt": {
+                    "source": "hydrofabric",
+                    "from": "soil_silt__attr"
+                  },
+                  "meanelevation": {
+                    "source": "hydrofabric",
+                    "from": "basin__mean_of_elevation"
+                  },
+                  "meanTa": {
+                    "source": "hydrofabric",
+                    "from": "atmosphere_water__daily_mean_of_temperature"
+                  },
+                  "permafrost": {
+                    "source": "hydrofabric",
+                    "from": "land_surface_water__permafrost_fraction"
+                  },
+                  "permeability": {
+                    "source": "hydrofabric",
+                    "from": "bedrock__permeability"
+                  },
+                  "seasonality_P": {
+                    "source": "hydrofabric",
+                    "from": "p_seasonality"
+                  },
+                  "seasonality_PET": {
+                    "source": "hydrofabric",
+                    "from": "land_surface_water__potential_evaporation_volume_flux_seasonality"
+                  },
+                  "snow_fraction": {
+                    "source": "hydrofabric",
+                    "from": "land_surface_water__snow_fraction"
+                  },
+                  "snowfall_fraction": {
+                    "source": "hydrofabric",
+                    "from": "atmosphere_water__precipitation_falling_as_snow_fraction"
+                  },
+                  "T_clay": {
+                    "source": "hydrofabric",
+                    "from": "soil_clay__volume_fraction"
+                  },
+                  "T_gravel": {
+                    "source": "hydrofabric",
+                    "from": "soil_gravel__volume_fraction"
+                  },
+                  "T_sand": {
+                    "source": "hydrofabric",
+                    "from": "soil_sand__volume_fraction"
+                  },
+                  "T_silt": {
+                    "source": "hydrofabric",
+                    "from": "soil_silt__volume_fraction"
+                  },
+                  "Porosity": {
+                    "source": "hydrofabric",
+                    "from": "soil_active-layer__porosity"
+                  },
+                  "uparea": {
+                    "source": "hydrofabric",
+                    "from": "basin__area"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "forcing": {
+      "path": "./data/dhbv2/forcing/attributes_jrb_5yr_cat-88306.nc",
+      "provider": "NetCDF"
+    }
+  },
+  "time": {
+    "start_time": "2000-01-01 00:00:00",
+    "end_time": "2005-12-30 23:00:00",
+    "output_interval": 86400
+  },
+  "output_root": "./ngen_output/"
+}

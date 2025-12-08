@@ -1,0 +1,11 @@
+### Multi-catchment configuration ###
+config_model: models/hfv2.2_15yr/config.yaml
+stepwise: True  # True: stepwise inference, False: Single forward simulation on all data in one go
+initial_state: zero  # zero: set initial states of the model to zero
+dtype: np.float32
+verbose: 1  # 0: no output, 1: print output
+
+# Simulation window
+time_step: 1 day
+start_time: 2000/01/01
+end_time: 2005/12/31

@@ -6,7 +6,7 @@
 
 ---
 
-First introduced in the preprint “High-resolution national-scale water modeling is enhanced by multiscale differentiable physics-informed machine learning” by Song et al. (2024), δHBV2.0 is the latest-generation differentiable HBV model leveraging intelligent parameterization, big data, and highly-parallelized GPU compute with PyTorch to deliver CONUS-scale, high-resolution inference of HBV parameters and fluxes. (See publication [below](#publication) for details.)
+First introduced in the preprint “High-resolution national-scale water modeling is enhanced by multiscale differentiable physics-informed machine learning” by Song et al. (2024), δHBV 2.0 is the latest-generation differentiable HBV model leveraging intelligent parameterization, big data, and highly-parallelized GPU compute with PyTorch to deliver CONUS-scale, high-resolution inference of HBV parameters and fluxes. (See publication [below](#publication) for details.)
 
 This repo is an operations-level module for use with NOAA-OWP’s Next Generation National Water Modeling Framework ([NextGen](https://github.com/NOAA-OWP/ngen)) and currently supports δHBV2.0 with unit hydrograph (UH) routing.
 

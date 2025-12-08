@@ -1,0 +1,53 @@
+{
+    "global": {
+      "formulations":
+      [
+        {
+          "name": "bmi_python",
+          "params": {
+              "python_type": "dhbv2.bmi.DeltaModelBmi",
+              "model_type_name": "DeltaModelBmi",
+              "init_config": "./data/dhbv2/config/bmi_cat-88306.yml",
+              "allow_exceed_end_time": true,
+              "main_output_variable": "land_surface_water__runoff_volume_flux",
+              "fixed_time_step": false,
+              "uses_forcing_file": false,
+              "variables_names_map" : {
+                  "P": "atmosphere_water__liquid_equivalent_precipitation_rate",
+                  "Temp": "land_surface_air__temperature",
+                  "PET": "land_surface_water__potential_evaporation_volume_flux",
+                  "streamflow_cms": "land_surface_water__runoff_volume_flux"}
+        }
+      }
+      ],
+        "forcing": {
+            "path": "./data/dhbv2/forcing/attributes_jrb_5yr_cat-88306.nc",
+            "provider": "NetCDF"
+        }
+    },
+    "time": {
+        "start_time": "2000-01-01 00:00:00",
+        "end_time": "2005-12-30 23:00:00",
+        "output_interval": 86400
+    },
+    "catchments": {
+        "cat-88306":
+        {
+          "formulations": [
+            { "name": "bmi_python",
+              "params": {
+                "pytorch_model_path": "./data/dhbv2/dhbv2_ep100.pt",
+                "latitude": 40.36467900401266,
+                "longitude": -77.83367525629326,
+                "area_square_km": 3.253501,
+                "useGPU": false
+            }
+          }
+        ],
+            "forcing": {
+                "path": "./data/dhbv2/forcing/attributes_jrb_5yr_cat-88306.nc",
+                "provider": "NetCDF"
+            }
+        }
+    }
+}

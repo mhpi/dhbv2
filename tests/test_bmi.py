@@ -20,7 +20,7 @@ def cfg_file():
     config_path = (
         Path(__file__).parent.parent.parent
         / "bmi_config_files"
-        / "bmi_cat-67.yaml"
+        / "bmi_config_cat-88306_5yr.yaml"
     )
     if not config_path.exists():
         pytest.skip(f"Configuration file not found: {config_path}")
