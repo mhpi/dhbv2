@@ -1,0 +1,3 @@
+δHBV2.0 weights are too large (~350Mb) to store on GitHub;
+
+Download from [Amazon S3](https://mhpi-spatial.s3.us-east-2.amazonaws.com/mhpi-release/models/owp/dhbv_2_mts_hfv2.2_15y_daily.zip)

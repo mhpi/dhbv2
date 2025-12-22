@@ -1,4 +1,3 @@
-
 # Example Data
 
 To run the models, you will need two types of data:
