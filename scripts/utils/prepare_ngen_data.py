@@ -6,20 +6,28 @@ Mirrors structure of ./ngen/data/forcing/cat-67_2015-12-01 00_00_00_2015-12-30 2
 @leoglonz
 """
 
+import os
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import xarray as xr
 
+# Setup pathing
+pkg_root = Path(__file__).parent.parent.parent
+
+
 n_cat = 3
 t_start = '2008-01-09 00:00:00'
-t_end = '2015-12-30 23:00:00'
+t_end = '2010-12-30 23:00:00'
 
-example_path = '/projects/mhpi/leoglonz/ciroh-ua/ciroh-ua-ngen/data/forcing/cat-67_2015-12-01 00_00_00_2015-12-30 23_00_00.csv'
-camels_path = '/gpfs/yxs275/data/hourly/CAMELS_HF/forcing/forcing_1990_2018_gauges_hourly_00000_00499.nc'
-out_path = f'/projects/mhpi/leoglonz/ciroh-ua/dhbv2_mts/ngen_resources/data/forcing/camels_{t_start.replace(":", "_").replace(" ", "_")}_{t_end.replace(":", "_").replace(" ", "_")}.nc'
+data_path = '/gpfs/yxs275/data/hourly/CAMELS_HF/forcing/forcing_1990_2018_gauges_hourly_00000_00499.nc'
+out_path = os.path.join(
+    pkg_root,
+    f"ngen_resources/data/forcing/camels_{t_start.replace(':', '_').replace(' ', '_')}_{t_end.replace(':', '_').replace(' ', '_')}.nc",
+)
 
-df = pd.read_csv(example_path)
-camels_xr = xr.open_dataset(camels_path)
+camels_xr = xr.open_dataset(data_path)
 
 out_df = pd.DataFrame()
 

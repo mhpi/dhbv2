@@ -25,34 +25,69 @@ Do this if you plan to use the BMI(s) on their own or develop on this module.
     cd dhbv2
     ```
 
-2. Install dependencies:
+2. Create a conda/venv environment to isolate dependencies:
 
-    We recommend [Astral UV](https://docs.astral.sh/uv/) to install packages, however standard `pip install` will also work.
+    Any Python version >=3.9 can be used.
+
+    ```bash
+    conda create -n dhbv2 python=3.9
+    conda activate dhbv2
+
+    # or
+
+    uv venv --python=3.9 .venv
+    source .venv/bin/activate
+    ```
+
+3. Install dependencies:
+
+    We recommend [Astral UV](https://docs.astral.sh/uv/) to install packages (available via `pip install uv`), however standard `pip install` will also work.
 
     ```bash
     uv pip install .
+
     # or with development dependencies
     uv pip install .[dev]
+
+    # or in editable mode
+    uv pip install -e .
     ```
 
-3. Add model weights:
+4. Add model weights:
 
     For parameterization, dhbv2 uses neural networks that require pre-trained weights to perform optimally. These must be downloaded and installed into dhbv2 manually.
 
     >If AWS CLI is not installed on your system (try `aws --version`) see [AWS instructions](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) for system-specific directions.
 
+    For daily:
+
     ```bash
     cd dhbv2
 
-    aws s3 cp s3://mhpi-spatial/mhpi-release/models/owp/{model_name}.zip . --no-sign-request
+    aws s3 cp s3://mhpi-spatial/mhpi-release/models/owp/dhbv_2.zip ./temp/ --no-sign-request
 
-    unzip {model_name}.zip -d /temp
+    unzip ./temp/dhbv_2.zip -d ./temp
 
-    mv /temp/{model_name}/. /ngen_resources/data/dhbv2/model/
-    rm -r /temp
+    mv ./temp/dhbv_2/ ./ngen_resources/data/dhbv2/model/
+    rm -r ./temp
     ```
 
-    where `model_name` = `dhbv_2` or `dhbv_2_mts`
+    or install [from your browser](https://mhpi-spatial.s3.us-east-2.amazonaws.com/mhpi-release/models/owp/dhbv_2.zip) (slower) and move contents to `/ngen_resources/data/dhbv2/model/`.
+
+    For hourly:
+
+    ```bash
+    cd dhbv2
+
+    aws s3 cp s3://mhpi-spatial/mhpi-release/models/owp/dhbv_2_mts.zip ./temp/ --no-sign-request
+
+    unzip ./temp/dhbv_2_mts.zip -d ./temp
+
+    mv ./temp/dhbv_2_mts/ ./ngen_resources/data/dhbv2_mts/model/
+    rm -r ./temp
+    ```
+
+    or install [from your browser](https://mhpi-spatial.s3.us-east-2.amazonaws.com/mhpi-release/models/owp/dhbv_2_mts.zip) (slower) and move contents to `/ngen_resources/data/dhbv2_mts/model/`.
 
 ### (2) NextGen Integration
 

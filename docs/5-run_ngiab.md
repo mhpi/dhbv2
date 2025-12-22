@@ -24,7 +24,7 @@ When running inside the container, ensure your paths in the Realization JSONs ar
 Example init_config path in JSON:
 
 ```json
-"init_config": "/ngen/extern/dhbv2/ngen_resources/data/dhbv2_mts/config/bmi_cat-67.yaml"
+"init_config": "/ngen/extern/dhbv2/ngen_resources/data/dhbv2_mts/config/bmi_cat-2453.yaml"
 ```
 
 ## (4) Running the Model
@@ -33,5 +33,5 @@ Execute the standard NGIAB run command. The container will detect the python pac
 
 ```bash
 # Example execution from NGIAB root
-./run_ngen.sh /ngen/extern/dhbv2/ngen_resources/data/dhbv2_mts/realizations/realization_cat-67.json
+./run_ngen.sh /ngen/extern/dhbv2/ngen_resources/data/dhbv2_mts/realizations/realization_cat-2453.json
 ```

@@ -246,26 +246,21 @@ class MtsDeltaModelBmi(Bmi):
 
         # Read model configuration file
         try:
-            model_config_path = os.path.join(
+            model_dir = os.path.join(
                 root_path,
                 '..',
                 '..',
                 'ngen_resources/data/dhbv2_mts/',
-                self.bmi_config.get('model_config'),
+                self.bmi_config.get('model_path'),
             )
+            model_config_path = os.path.join(model_dir, 'config.yaml')
             with open(model_config_path) as f:
                 self.model_config = yaml.safe_load(f)
         except Exception as e:
             raise RuntimeError(f"Failed to load model configuration: {e}") from e
 
         self.model_config = self.initialize_config(self.model_config)
-        self.model_config['model_dir'] = os.path.join(
-            root_path,
-            '..',
-            '..',
-            'ngen_resources/data/dhbv2_mts/',
-            self.model_config.get('model_dir'),
-        )
+        self.model_config['model_dir'] = model_dir
 
         # Load normalization statistics
         self._load_norm_stats()

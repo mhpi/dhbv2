@@ -9,8 +9,9 @@
 **δHBV 2.0** is a state-of-the-art, distributed differentiable HBV model leveraging intelligent parameterization, big data, and highly-parallelized GPU compute with PyTorch to deliver CONUS-scale, high-resolution inference of parameters and fluxes.
 
 This repository serves as an **operations-level module** for NOAA-OWP’s [Next Generation National Water Modeling Framework (NextGen)](https://github.com/NOAA-OWP/ngen). It provides **Basic Model Interface (BMI)** adapters for two modeling modalities:
-1.  **δHBV 2.0**: Daily timestep simulation.
-2.  **δHBV 2.0 MTS**: Hourly timestep simulation using a Multi-TimeScale (MTS) architecture.
+
+1. **δHBV 2.0**: Daily timestep simulation.
+2. **δHBV 2.0 MTS**: Hourly timestep simulation using a Multi-TimeScale (MTS) architecture.
 
 </br>
 
@@ -19,6 +20,7 @@ This repository serves as an **operations-level module** for NOAA-OWP’s [Next 
 > Models are built on the generic differentiable modeling framework [δMG](https://github.com/mhpi/generic_deltamodel).
 
 ### 1. δHBV 2.0 (Daily)
+
 *First introduced by Song et al. (2024) [[1]](#publications).*
 
 The daily model uses an LSTM and MLP to learn parameters for the differentiable physical model HBV 2.0. Weather forcings (precipitation, temperature, PET) and static catchment attributes are used as inputs to simulate hydrological states and fluxes:
@@ -32,11 +34,13 @@ $$
 $$
 
 where:
+
 * $\theta$: Learned dynamic ($d$) and static ($s$) parameters.
 * $x_m, A_m$: Forcings and attributes for unit basin $m$.
 * $Q, S$: Model fluxes (e.g., streamflow) and states (e.g., snowpack).
 
 ### 2. δHBV 2.0 MTS (Hourly)
+
 *Introduced by Yang et al. (2025) [[2]](#publications).*
 
 The **Multi-TimeScale (MTS)** variant adapts the architecture for hourly simulation. It incorporates a rolling window input caching mechanism to bridge the gap between long-term hydrologic memory and high-frequency forcing:

@@ -20,11 +20,11 @@ We provide prepared datasets containing a subset of AORC forcings and NextGen Hy
 
 - Catchments: [`2453`, `2454`, `2455`]
 
-- Time: `2008-01-09 00:00` to `2015-12-30 23:00`.
+- Time: `2008-01-09 00:00:00` to `2010-12-30 23:00:00`.
 
-Forcing location: `dhbv2/ngen_resources/data/forcing/camels_2008-01-09_00_00_00_2015-12-30_23_00_00.nc`
+Forcing location: `/ngen_resources/data/forcing/camels_2008-01-09_00_00_00_2010-12-30_23_00_00.nc`
 
-Attribute location: Currently recorded in BMI config. Will later support direct reading from HydroFabric geopackage.
+Attribute location: Currently stored in BMI config. BMI will later support direct reading from a remotely hosted HydroFabric geopackage containing attributes for all 800k catchments.
 
 <!-- **Download Link:**
 [AWS S3 - NextGen Demo Data](https://mhpi-spatial.s3.us-east-2.amazonaws.com/mhpi-release/aorc_hydrofabric/ngen_demo.zip) -->
@@ -66,8 +66,8 @@ dhbv2/
         │   └── realizations/
         │
         ├── forcing/          # CSV or NetCDF forcings
-        │   └── cat-67_2015...csv
+        │   └── cat-2453_2008...csv
         │
         └── spatial/          # GeoJSON/Hydrofabric files
-            └── catchment_data_cat67.geojson
+            └── catchment_data_cat-2453.geojson
 ```

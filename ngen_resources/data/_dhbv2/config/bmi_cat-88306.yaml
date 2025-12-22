@@ -1,7 +1,7 @@
 ### Single-catchment configuration ###
-catchment_id: 'cat-67'
+catchment_id: 'cat-88306'
 
-# Catchment attributes
+# Static catchment attributes
 aridity: 1.041
 meanP: 991.3
 ETPOT_Hargr: 1031.0
@@ -30,14 +30,10 @@ T_sand: 41.0
 T_silt: 39.0
 Porosity: 0.01
 uparea: 3.254
-catchsize: 3.254
-lengthkm: 3.2
 
-model_config: models/hfv2.2_15yr/config.yaml
-states_name: initial_states_2009.pt
-# stats_path: models/hfv2.2_15yr/normalization_statistics.json
-use_daily_states: false
+config_model: models/
+stepwise: True  # True: stepwise inference, False: Single forward simulation on all data in one go
 dtype: np.float32
-verbose: true  # 0: no output, 1: print output
+verbose: false
 
-time_step: 1 hour
+time_step: 1 day

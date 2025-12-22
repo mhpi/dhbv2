@@ -6,29 +6,25 @@ You can run the models in "standalone" mode using Python scripts. This is useful
 
 ## Scripts
 
-The `scripts/` directory contains helpers for both Daily and MTS models.
+The `scripts/` directory contains BMI forward scripts for both daily and MTS hourly models.
 
 ### (1) Running the Daily Model
 
-The `forward.py` script mimics the BMI lifecycle for the daily model.
+The `forward_daily_cat-88306.py` script mimics the BMI lifecycle for the daily model and uses example forcing data contained within this module.
 
 ```bash
-python scripts/forward.py
+python scripts/forward_daily_cat-88306.py
 ```
-
-- Config: scripts/forward.py defaults to cat-88306. You may need to edit the BASIN_ID variable or path strings to match your data.
-
-- Input: Expects NetCDF forcing by default, but can be adapted for CSV.
 
 ### (2) Running the MTS (Hourly) Model
 
-The `forward_mts_cat-67.py` script runs the hourly multi-timescale model for a specific test catchment (cat-67).
+The `forward_mts_cat-2453.py` script runs the MTS hourly model for a specific test catchment (cat-2453; 2453, 2454, 2455 are available).
 
-- Config: Uses `ngen_resources/data/dhbv2_mts/config/bmi_cat-67.yaml`.
+- Config: Uses `ngen_resources/data/dhbv2_mts/config/bmi_cat-2453.yaml`.
 
-- Input: Uses CSV forcing files.
+- Input: Uses NetCDF forcing file `ngen_resources/data/forcing/camels_2008-01-09_00_00_00_2010-12-30_23_00_00.nc`.
 
-- Output: Prints streamflow (m3/s) for each hour to the console.
+- Output: Streamflow (m3/s) for each hour.
 
 </br>
 
@@ -36,13 +32,12 @@ The `forward_mts_cat-67.py` script runs the hourly multi-timescale model for a s
 
 Standalone runs rely on **BMI config files** (YAML). These define the physics options and point to the static attributes.
 
-Example `bmi_cat-67.yaml`:
+Example `bmi_cat-2453.yaml`:
 
 ```yaml
-catchment_id: 'cat-67'
+catchment_id: 'cat-2453'
 time_step: 1 hour
-model_config: models/hfv2.2_15yr/config.yaml
-states_name: initial_states_2009.pt
+model_path: models/
 use_daily_states: false
 # ... list of static attributes (aridity, meanP, etc.) ...
 ```

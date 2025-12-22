@@ -33,11 +33,10 @@ uparea: 7.7805003825041545
 catchsize: 7.7805003825041545
 lengthkm: 2.147179500288239
 
-model_config: models/hfv2.2_15yr/config.yaml
-states_name: initial_states_2009.pt
-# stats_path: models/hfv2.2_15yr/normalization_statistics.json
+# BMI configuration
+model_path: model/
 use_daily_states: false
 dtype: torch.float
-verbose: true  # 0: no output, 1: print output
+verbose: false
 
 time_step: 1 hour

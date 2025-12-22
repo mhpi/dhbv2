@@ -1,10 +1,18 @@
-To use in the NextGen Framework,
-1) Copy contents of the dhbv2 repo into `ngen/extern/dhbv2/dhbv2/`.
-2) Copy contents of `ngen_resources/data/` into `./ngen/data/`. This contains data for the model, realizations for NextGen, and other config files enabling the dhbv2 package to run from within NextGen.
+# Data
 
-`ngen_resources/data/` contains:
-- δHBV2.0 model, BMI, and routing configuration files in `config/`,
-- Pretrained model weights for δHBV2.0 in `models/`,
-- "Realization" configuration files for NextGen in `realization/`,
-- CONUS-scale statistics for static catchment attributes, catchment and nexus data GeoJSON files, and a subset (Juniata River Basin) of the NextGen hydrofabric v2.2 in `spatial/`,
-- AORC forcing data for NextGen + δHBV2.0 forward inference on the Juniata River Basin in `forcing/`.
+This directory contains files necessary for operating NextGen and for minimal
+operation of a BMI standalone.
+
+1. Realizations: Configure a NextGen runtime;
+2. BMI configs: Configure a BMI instance;
+3. Model: Downloaded separately (see `docs/1-module_setup.md`), contains
+
+    - Trained model weights
+    - Input normalization statistics
+    - Model config
+
+4. Forcings: AORC forcings for a catchment or catchments. A demo forcing file is
+    included which matches the structure of NextGen NetCDF forcing files.
+
+5. Hydrofabric: Static catchment attributes stored as a geojson or geopkg for the
+    catchments included in the forcing data.

@@ -1,7 +1,13 @@
 """
-Forward BMI on single catchment with pseudo-NextGen operating behavior.
+Forward dHBV2 MTS (hourly) BMI on single catchment with pseudo-NextGen
+operating behavior.
 
-We use catchment 67 which is included with NOAA-OWP/ngen.
+We use catchment `cat-2453` (2454 and 2455 also available) on the CAMELS
+dataset as an example, with forcing timeseries available from 2008 to 2011.
+
+NOTE: As of writing, the MTS model requires 1yr (558 days) of spinup data prior
+to simulation start. Therefore, this script will provide simulations starting
+from 2009-01-01 using the provided data.
 
 @leoglonz
 """
@@ -9,9 +15,9 @@ We use catchment 67 which is included with NOAA-OWP/ngen.
 import logging
 import os
 from pathlib import Path
-import pandas as pd
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 from dhbv2.mts_bmi import MtsDeltaModelBmi as Bmi
@@ -20,12 +26,13 @@ log = logging.getLogger('BMI_Demo')
 logging.basicConfig(level=logging.INFO)
 
 ### Configuration Settings (single-catchment) ###
-CAT_ID = 'cat-2453'
-BMI_CONFIG_PATH = 'ngen_resources/data/dhbv2_mts/config/bmi_cat-2453.yaml'
+CAT_ID = 'cat-2453'  # Options: cat-2453, cat-2454, cat-2455
+BMI_CONFIG_PATH = './ngen_resources/data/dhbv2_mts/config/bmi_cat-2453.yaml'
 FORCING_PATH = (
-    # 'ngen_resources/data/forcing/camels_2010-01-01_00_00_00_2011-12-30_23_00_00.nc'
-    '/projects/mhpi/leoglonz/ciroh-ua/dhbv2_mts/ngen_resources/data/forcing/camels_2008-01-09_00_00_00_2015-12-30_23_00_00.nc'
+    './ngen_resources/data/forcing/camels_2008-01-09_00_00_00_2010-12-30_23_00_00.nc'
 )
+SAVE_OUTPUT = True
+SAVE_PATH = f'./output/dhbv2_mts_hourly_{CAT_ID}_runoff.npy'
 ### ----------------------------------------- ###
 
 
@@ -37,7 +44,7 @@ forcing_path = os.path.join(pkg_root, Path(FORCING_PATH))
 
 # Create dHBV 2.0 BMI instance
 log.info("Creating BMI instance")
-model = Bmi(verbose=True)
+model = Bmi(verbose=False)
 
 
 ### BMI initialization ###
@@ -61,7 +68,7 @@ runoff_sim = []
 log.info(f"Begin BMI update loop for {t_steps} steps")
 for t in range(t_steps):
     time = pd.to_datetime(forcings['Time'].isel({'time': t}), unit='ns')
-    print(f"Current time: {time}, step {t}")
+    # print(f"Current time: {time}, step {t}")
 
     # Set forcing values
     model.set_value(
@@ -86,14 +93,19 @@ for t in range(t_steps):
     model.get_value('land_surface_water__runoff_volume_flux', dest_array)
     runoff_sim.append(dest_array[-1])
 
-    if t > 24 * 365:
+    if (t > 24 * 365) and (t % 1000 == 0):
         log.info(
-            f"Result: Streamflow at time {model.get_current_time()} ({model.get_time_units()}) is {runoff_sim[-1]:.4f} m3/s",
+            f" Time {model.get_current_time()} {model.get_time_units()} ({time}, step {t}) | Runoff {runoff_sim[-1]:.4f} m3/s",
         )
-        # runoff_sim_array = torch.tensor(runoff_sim)
-        # torch.save(runoff_sim_array, f'/projects/mhpi/leoglonz/ciroh-ua/dmg/hf_outputs/cat-2543/ngen_qs.pt')
 
 
 ### BMI finalization ###
 log.info("Finalizing BMI")
 model.finalize()
+
+if SAVE_OUTPUT:
+    log.info(f"Saving output to {SAVE_PATH}")
+    os.makedirs(os.path.dirname(SAVE_PATH), exist_ok=True)
+
+    # Remove spinup period (first 8592 hours)
+    np.save(SAVE_PATH, np.array(runoff_sim)[8592:])
