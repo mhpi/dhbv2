@@ -74,7 +74,7 @@ Do this if you plan to use the BMI(s) on their own or develop on this module.
 
     or install [from your browser](https://mhpi-spatial.s3.us-east-2.amazonaws.com/mhpi-release/models/owp/dhbv_2.zip) (slower) and move contents to `/ngen_resources/data/dhbv2/model/`.
 
-    For hourly:
+    For hourly (MTS):
 
     ```bash
     cd dhbv2
@@ -83,11 +83,11 @@ Do this if you plan to use the BMI(s) on their own or develop on this module.
 
     unzip ./temp/dhbv_2_mts.zip -d ./temp
 
-    mv ./temp/dhbv_2_mts/ ./ngen_resources/data/dhbv2_mts/model/
+    mv ./temp/dhbv_2_mts/ ./ngen_resources/data/dhbv_2_mts/model/
     rm -r ./temp
     ```
 
-    or install [from your browser](https://mhpi-spatial.s3.us-east-2.amazonaws.com/mhpi-release/models/owp/dhbv_2_mts.zip) (slower) and move contents to `/ngen_resources/data/dhbv2_mts/model/`.
+    or install [from your browser](https://mhpi-spatial.s3.us-east-2.amazonaws.com/mhpi-release/models/owp/dhbv_2_mts.zip) (slower) and move contents to `/ngen_resources/data/dhbv_2_mts/model/`.
 
 ### (2) NextGen Integration
 
@@ -118,7 +118,7 @@ To use this module within the [NextGen framework](https://github.com/NOAA-OWP/ng
     ```bash
     cd ngen
 
-    mv extern/dhbv2/dhbv2/ngen_resources/data data/.
+    mv ./extern/dhbv2/dhbv2/ngen_resources/data ./data/.
     ```
 
 4. Add model weights:
@@ -130,11 +130,16 @@ To use this module within the [NextGen framework](https://github.com/NOAA-OWP/ng
     ```bash
     cd ngen
 
-    aws s3 cp s3://mhpi-spatial/mhpi-release/models/owp/{model_name}.zip . --no-sign-request
+    # For daily model:
+    aws s3 cp s3://mhpi-spatial/mhpi-release/models/owp/dhbv_2.zip . --no-sign-request
+    unzip dhbv_2.zip -d /temp
+    mv /temp/hbv_2/. ./data/dhbv2/model/dhbv_2/
+    rm -r /temp
 
-    unzip {model_name}.zip -d /temp
-
-    mv /temp/{model_name}/. data/dhbv2/model/
+    # For hourly (MTS) model:
+    aws s3 cp s3://mhpi-spatial/mhpi-release/models/owp/dhbv_2_mts.zip . --no-sign-request
+    unzip dhbv_2_mts.zip -d /temp
+    mv /temp/dhbv_2_mts/. ./data/dhbv_2_mts/model/dhbv_2_mts/
     rm -r /temp
     ```
 
@@ -155,9 +160,9 @@ ngen/
 │           ├── ngen_resources/   # Configs, realizations, model weights
 │           └── scripts/          # Standalone test scripts
 ├── data/
-│   ├── dhbv2                 # Configs, realizations, model weights
-│   ├── dhbv2_mts             # Configs, realizations, model weights
+│   ├── dhbv_2                 # Configs, ...
+│   ├── dhbv_2_mts             # Configs, ...
 │   ├── forcing               # Forcings
-│   └── spatial               # Hydrofabric data
+│   └── spatial               # HydroFabric data
 └── ...
 ```

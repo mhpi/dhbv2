@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 from netCDF4 import Dataset
 
-from dhbv2.bmi import DeltaModelBmi as Bmi
+from dhbv2._bmi import DeltaModelBmi as Bmi
 
 ### Configuration Settings (single-catchment) ###
 BASIN_ID = 'cat-88306'

@@ -21,8 +21,8 @@ requires-python = ">=3.9.0"
 dynamic = ["version"]
 dependencies = [
     "bmipy",
-    "dmg @ git+https://github.com/mhpi/generic_deltamodel.git@ngen_mts",
-    "hydrodl2 @ git+https://github.com/mhpi/hydrodl2.git@ngen_mts",
+    "dmg @ git+https://github.com/mhpi/generic_deltamodel.git@master",
+    "hydrodl2 @ git+https://github.com/mhpi/hydrodl2.git@master",
     "numpy~=1.0",
     "pandas",
     "pre-commit",

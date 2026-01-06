@@ -100,21 +100,21 @@ docker system prune -f
 }
 ```
 
-### 2. Hourly MTS Simulation (`realization_cat-2453.json`)
+### 2. Hourly (MTS) Simulation (`realization_cat-2453.json`)
 
 ```json
 {
   "global": { "time": { "output_interval": 3600 } },
   "catchments": {
-    "cat-2453": {
+    "cat-2453': {
       "formulations": [
         {
           "name": "bmi_python",
           "params": {
             "python_type": "dhbv2.mts_bmi.MtsDeltaModelBmi",
-            "model_type_name": "HBV2.0 MTS",
-            "init_config": "./data/dhbv2_mts/config/bmi_cat-2453.yaml",
-            "uses_forcing_file": true,
+            "model_type_name": "DeltaModelBmi",
+            "init_config": "./data/dhbv_2_mts/config/bmi_cat-2453.yaml",
+            "uses_forcing_file": false,
             "main_output_variable": "land_surface_water__runoff_volume_flux",
             ...
           }
@@ -142,16 +142,29 @@ Run the NextGen engine pointing to the realization file:
 or, with a docker image,
 
 ```bash
+# With geojson for 1 catchment
 docker run --rm \
     -v $(pwd)/data:/app/data \
     localbuild/ngen:latest \
     ./ngen \
-    /path/to/catchment_data.geojson "cat-2454" \
-    /path/to/nexus_data.geojson "nex-2454" \
-    /path/to/realization_cat-2453.json
+    /path/to/catchment_data.geojson 'cat-2453' \
+    /path/to/nexus_data.geojson 'nex-2454' \
+    ./data/dhbv2_mts/realizations/realization_cat-2453.json
+
+# With geopackage
+docker run --rm \
+    -v $(pwd)/data:/app/data \
+    localbuild/ngen:latest \
+    ./ngen \
+    ./data/camels_hf2.gpkg 'cat-2453' \
+    ./data/camels_hf2.gpkg 'nex-2454' \
+    ./data/dhbv2_mts/realizations/realization_cat-2453.json
 ```
 
+To run all catchments defined in the geopackage/geojson, leave catchment and nexus (e.g., `'cat-2453'` and `'nex-2454'`) defined as `''`.
+
 > Note: If using Docker, make sure `output_root` in your realization begins with `/app/data/`. This will ensure ngen outputs are accessible outside of your Docker container in `./ngen/data/`.
+> Note: with default settings, ngen output will save to `./ngen/data/output/`
 
 ## Validation
 

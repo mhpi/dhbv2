@@ -13,8 +13,7 @@ import pandas as pd
 import torch
 
 # Assuming these are available in your environment
-from dmg.core.data.data import timestep_resample
-from dmg.core.utils.utils import format_resample_interval
+from dmg.core import timestep_resample, format_resample_interval
 from numpy.typing import NDArray
 
 # Setup pathing
@@ -23,9 +22,9 @@ pkg_root = Path(__file__).parent.parent
 
 ### -------- Settings -------- ###
 # Numpy file with dhbv2 runoff data
-SIM_PATH = f"{pkg_root}/tests/dhbv2_mts_hourly_cat-2453_runoff.npy"
+SIM_PATH = f"{pkg_root}/output/dhbv_2_mts_cat-2453_runoff.npy"
 SAVE_PATH = f"{pkg_root}/output/runoff_simulation.png"
-TIME_START = "2009-01-01 00:00:00"
+TIME_START = "2008-01-09 00:00:00"
 TIME_END = "2010-12-30 23:00:00"
 ### -------------------------- ###
 
@@ -103,7 +102,10 @@ def plot_hydrograph(
 if __name__ == "__main__":
     # Load simulation data
     runoff_sim = np.load(SIM_PATH)
-    print(f"Loaded data shape: {runoff_sim.shape}")
+    print(f"Loaded {runoff_sim.shape[0]} hours")
+
+    # print("Removing first 358 days of warmup")
+    # runoff_sim = runoff_sim[8592:]  # Remove first 8592 hours (358 days)
 
     # Generate time index
     time_index = pd.date_range(start=TIME_START, end=TIME_END, freq='h')

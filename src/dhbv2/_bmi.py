@@ -1,6 +1,6 @@
-"""BMI wrapper for interfacing dHBV 2.0 with NOAA-OWP NextGen framework.
+"""BMI wrapper for interfacing δHBV2.0 with NOAA-OWP/ngen framework.
 
-Author: Leo Lonzarich
+@Leo Lonzarich
 """
 
 import json

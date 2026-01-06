@@ -34,9 +34,9 @@ catchsize: 7.7805003825041545
 lengthkm: 2.147179500288239
 
 # BMI configuration
-model_path: ./data/dhbv2_mts/model/dhbv_2_mts/
-use_daily_states: false
-dtype: torch.float
+model_dir: ./data/dhbv_2_mts/model/dhbv_2_mts/
+dtype: float32
+
 verbose: false
 
 time_step: 1 hour

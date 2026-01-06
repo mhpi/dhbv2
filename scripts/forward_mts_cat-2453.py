@@ -27,12 +27,12 @@ logging.basicConfig(level=logging.INFO)
 
 ### Configuration Settings (single-catchment) ###
 CAT_ID = 'cat-2453'  # Options: cat-2453, cat-2454, cat-2455
-BMI_CONFIG_PATH = './ngen_resources/data/dhbv2_mts/config/bmi_cat-2453.yaml'
+BMI_CONFIG_PATH = './ngen_resources/data/dhbv_2_mts/config/bmi_cat-2453.yaml'
 FORCING_PATH = (
-    './ngen_resources/data/forcing/camels_2008-01-09_00_00_00_2010-12-30 23_00_00.nc'
+    './ngen_resources/data/forcing/camels_2008-01-09 00_00_00_2010-12-30 23_00_00.nc'
 )
 SAVE_OUTPUT = True
-SAVE_PATH = f'./output/dhbv2_mts_hourly_{CAT_ID}_runoff.npy'
+SAVE_PATH = f'./output/dhbv_2_mts_{CAT_ID}_runoff.npy'
 ### ----------------------------------------- ###
 
 
@@ -49,7 +49,7 @@ model = Bmi(verbose=False)
 
 ### BMI initialization ###
 log.info("Initializing BMI")
-model.initialize(config_path=bmi_config_path)
+model.initialize(config_file=bmi_config_path)
 
 
 log.info(f"Preparing data for catchment ID: {CAT_ID}")
@@ -59,13 +59,16 @@ t_steps = len(forcings['time'])
 
 # Maintain strict typing of forcing arrays
 precip = forcings['precip_rate[mm h-1]'].values.astype(np.float64)
-temp = forcings['TMP_2maboveground[degC]'].values.astype(np.float64)
+temp = forcings['TMP_2maboveground'].values.astype(np.float64)
 pet = forcings['PET_hargreaves'].values.astype(np.float64)
 
 
 runoff_sim = []
 
-log.info(f"Begin BMI update loop for {t_steps} steps")
+log.info(
+    f"Begin BMI update loop for {t_steps} steps. "
+    f"First 1yr is model spinup with no output.",
+)
 for t in range(t_steps):
     time = pd.to_datetime(forcings['Time'].isel({'time': t}), unit='ns')
     # print(f"Current time: {time}, step {t}")
@@ -108,4 +111,4 @@ if SAVE_OUTPUT:
     os.makedirs(os.path.dirname(SAVE_PATH), exist_ok=True)
 
     # Remove spinup period (first 8592 hours)
-    np.save(SAVE_PATH, np.array(runoff_sim)[:])
+    np.save(SAVE_PATH, np.array(runoff_sim)[8592:])

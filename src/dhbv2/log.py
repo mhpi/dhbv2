@@ -1,14 +1,16 @@
 """Config for debug logging in ngen runtime.
 
-Inspired by Austin Raney in NOAA-OWP/lstm.
+Inspired by NOAA-OWP/lstm logging @Austin Raney.
 """
+
 import logging
 import logging.config
 
 log = logging.getLogger("bmi.dhbv2")
 
 
-def configure_logging(level:str='info'):
+def configure_logging(level: str = 'info') -> None:
+    """Configure logging for dhbv2 module."""
     if level == 'info':
         level = logging.INFO
     elif level == 'debug':
@@ -51,6 +53,6 @@ logging_config = {
             "handlers": ["stdout", "stderr"],
             "level": "INFO",
             "propagate": False,
-        }
+        },
     },
 }

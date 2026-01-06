@@ -34,20 +34,16 @@ out_df = pd.DataFrame()
 
 def transform_dataset(ds_in):
     """Transform CAMELS dataset to match target structure."""
-    # 1. Rename Dimensions first
+    # 1. Rename dims
     ds = ds_in.rename({'gauge': 'catchment-id'})
 
-    # --- INSERT SUBSETTING HERE (Before creating new vars or dropping coords) ---
-    # Use .isel (index select) for the first 100 catchments
-    # Use .sel (label select) for the specific date range
     ds = ds.isel({'catchment-id': slice(0, n_cat)})
     ds = ds.sel(time=slice(t_start, t_end))
-    # --------------------------------------------------------------------------
 
-    # 2. Rename Existing Variables
+    # 2. Rename existing vars
     ds = ds.rename(
         {
-            'P': 'precip_rate',
+            'P': 'precip_rate[mm h-1]',
             'T': 'TMP_2maboveground',
             'PET': 'PET_hargreaves',
         },
@@ -56,18 +52,15 @@ def transform_dataset(ds_in):
     for var in ds.variables:
         ds[var].encoding = {}
 
-    # 3. Create 'ids' Variable
+    # 3. Create 'ids' var
     raw_ids = ds['catchment-id'].values.astype(str)
 
-    # Prepend "cat-" using numpy's string operations
-    # cat_ids will be like ["cat-2453", "cat-2454", ...]
+    # Prepend "cat-" like ["cat-2453", "cat-2454", ...]
     cat_ids = np.char.add('cat-', raw_ids)
 
     ds['ids'] = (('catchment-id',), cat_ids)
 
-    # 4. Create 'Time' Variable with Nanosecond Units
-    # .view('int64') accesses the raw nanoseconds from the datetime64[ns] object
-    # .astype('float64') converts that integer count to a float
+    # 4. Create 'Time' var with nanosecond units
     time_values = ds['time'].values.view('int64').astype('float64')
 
     time_broadcasted = np.tile(
@@ -78,7 +71,7 @@ def transform_dataset(ds_in):
     ds['Time'] = (('catchment-id', 'time'), time_broadcasted)
     ds['Time'].attrs = {'units': 'ns'}
 
-    # 5. Create Zero-Filled Variables
+    # 5. Create zero-filled vars
     zero_vars = [
         'APCP_surface',
         'DLWRF_surface',
@@ -95,14 +88,14 @@ def transform_dataset(ds_in):
 
     for var in zero_vars:
         ds[var] = (('catchment-id', 'time'), zeros)
-        ds[var].encoding = {'_FillValue': None}  # Ensure no default fill values exist
+        ds[var].encoding = {'_FillValue': None}
 
     # Convert to temp to kelvin
     ds['TMP_2maboveground'] = ds['TMP_2maboveground'].astype('float64') + np.float64(
         273.15,
     )
     ds['TMP_2maboveground'].attrs['units'] = 'K'
-    ds['precip_rate'].attrs['units'] = 'mm hr-1'
+    ds['precip_rate[mm h-1]'].attrs['units'] = 'mm hr-1'
     ds['PET_hargreaves'].attrs['units'] = 'mm hr-1'
     ds['APCP_surface'].attrs['units'] = 'kg m-2'
     ds['DLWRF_surface'].attrs['units'] = 'W m-2'
@@ -118,7 +111,6 @@ def transform_dataset(ds_in):
 
     ds['TMP_2maboveground'].encoding = {'dtype': 'float64'}
 
-    # 6. NOW it is safe to drop the coordinates
     ds = ds.drop_vars(['time', 'catchment-id'])
 
     return ds
@@ -126,7 +118,7 @@ def transform_dataset(ds_in):
 
 formatted_ds = transform_dataset(camels_xr)
 
-# save to nc
+# Save to nc
 formatted_ds.to_netcdf(
     out_path,
     format='NETCDF4',
@@ -143,8 +135,7 @@ def verify_integrity(original_path, new_path, t_start, t_end, n_cat):
     # Slice old dataset exactly like the new one for comparison
     ds_old_sub = ds_old.isel(gauge=slice(0, n_cat)).sel(time=slice(t_start, t_end))
 
-    # 1. Verify Precipitation (Direct Copy Check)
-    # Using strict equality because no math was done on P
+    # 1. Verify precipitation
     np.testing.assert_array_equal(
         ds_old_sub['P'].values,
         ds_new['precip_rate'].values,
@@ -152,8 +143,7 @@ def verify_integrity(original_path, new_path, t_start, t_end, n_cat):
     )
     print("✓ Precipitation matches exactly.")
 
-    # 2. Verify Temperature (Math Check)
-    # Allow float32 epsilon tolerance (approx 1e-6)
+    # 2. Verify temperature
     expected_temp = ds_old_sub['T'].values
     print(ds_old_sub['T'].sel(time='2008-01-09T00:00:00')[0].item())
     print((ds_new['TMP_2maboveground'].values - 273.15)[0][0].item())
@@ -168,5 +158,5 @@ def verify_integrity(original_path, new_path, t_start, t_end, n_cat):
     print("SUCCESS: No numerical discrepancies detected.")
 
 
-# # Run verification
+# Run verification
 # verify_integrity(camels_path, out_path, t_start, t_end, n_cat)

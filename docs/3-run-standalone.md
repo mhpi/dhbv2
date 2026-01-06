@@ -22,7 +22,7 @@ The `forward_mts_cat-2453.py` script runs the MTS hourly model for a specific te
 
 - Config: Uses `ngen_resources/data/dhbv2_mts/config/bmi_cat-2453.yaml`.
 
-- Input: Uses NetCDF forcing file `ngen_resources/data/forcing/camels_2008-01-09_00_00_00_2010-12-30_23_00_00.nc`.
+- Input: Uses NetCDF forcing file `ngen_resources/data/forcing/camels_2008-01-09 00_00_00_2010-12-30 23_00_00.nc`.
 
 - Output: Streamflow (m3/s) for each hour.
 
