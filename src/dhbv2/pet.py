@@ -139,7 +139,7 @@ def penman_monteith_pet(
 
     Reference: https://www.fao.org/4/x0490e/x0490e06.htm
 
-    Note: This formulation assumes (and converts) AORC inputs
+    NOTE: This formulation assumes (and converts) AORC inputs
         https://registry.opendata.aws/noaa-nws-aorc/
 
     Parameters

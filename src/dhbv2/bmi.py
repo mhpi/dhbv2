@@ -1,6 +1,8 @@
 """
-BMI wrapper for interfacing δHBV2.0 MTS (hourly) with the NOAA-OWP/ngen
-framework.
+BMI wrapper for interfacing δHBV2.0 (daily) with the NOAA-OWP/ngen framework.
+
+This BMI receives hourly inputs from ngen, aggregates them to daily values,
+and makes a daily prediction (then repeated for each of the following 24 hours until a new prediction is made).
 
 @Leo Lonzarich
 """
@@ -14,7 +16,7 @@ import numpy as np
 import torch
 import yaml
 from bmipy import Bmi
-from dmg import MtsModelHandler
+from dmg import ModelHandler
 from dmg.core import Dates
 from numpy.typing import NDArray
 
@@ -72,7 +74,6 @@ _static_input_vars = [
     ('soil_active-layer__porosity', '-'),
     ('basin__area', 'km2'),
     ('catchment__area', 'km2'),
-    ('basin__length', 'km'),
 ]
 
 # ----------------------------------------- #
@@ -125,7 +126,6 @@ _var_name_internal_map = {
     'Porosity': 'soil_active-layer__porosity',
     'uparea': 'basin__area',
     'catchsize': 'catchment__area',
-    'lengthkm': 'basin__length',
     # ----------- Outputs -----------
     'streamflow': 'land_surface_water__runoff_volume_flux',
 }
@@ -146,16 +146,15 @@ def map_to_internal(name: str):
 # -------------------------------------------------- #
 # (5) BMI
 # -------------------------------------------------- #
-class MtsDeltaModelBmi(Bmi):
+class DeltaModelBmi(Bmi):
     """
-    (δHBV2.0 MTS BMI) NextGen-compatible, differentiable, physics-informed ML
-    rainfall-runoff model for hydrologic forecasting (Yang et al., 2025; Song
-    et al., 2025).
+    (δHBV2.0 Daily BMI) NextGen-compatible, differentiable, physics-informed ML
+    rainfall-runoff model for hydrologic forecasting (Song et al., 2025).
 
-    A multi-timescale (hourly) version of the δHBV2.0 BMI at
-    (dhbv2/bmi.py). MTS uses a daily-scale HBV to warmup states for an
-    hourly-scale HBV and utilizes rolling window input caching for 358-day*
-    lagged hourly runoff simulation.
+    A daily version of the δHBV2.0 model that receives hourly inputs from ngen,
+    aggregates them to daily values, and makes predictions at the end of each
+    day. Predictions are repeated for all 24 hourly outputs until a new
+    prediction is available.
 
     Parameters
     ----------
@@ -170,17 +169,10 @@ class MtsDeltaModelBmi(Bmi):
 
     ---
 
-    *We cache 351 days of aggregated daily inputs + 7 days of hourly inputs to
-    warmup low- and high-frequency model states for the following 7 days of
-    hourly simulation. This window then rolls 7-days forward, repeating the
-    warmup steps as preparation for the next 7 days of simulation.
-    (This may be removed in the future to support direct streaming, but for now
-    we maintain a lag for representative model performance.)
-
     NOTE: This BMI uses both numpy arrays and pytorch tensors for internal
         computations (dtype is preserved).
-    NOTE: At least 351 days of hourly data are required before the first
-        model prediction is returned. See above.
+    NOTE: At least `rho` days (default 365) of data are required before the
+        first model prediction is returned.
     NOTE: BMI can only run forward inference. Training code will be released in
         the δMG package (https://github.com/mhpi/generic_deltamodel) at a later
         date.
@@ -188,7 +180,7 @@ class MtsDeltaModelBmi(Bmi):
 
     def __init__(self, verbose: bool = False) -> None:
         super().__init__()
-        self._name = 'δHBV2.0 MTS'
+        self._name = 'δHBV2.0 Daily'
         self._version = '1.0'
         self._author_name = 'Leo Lonzarich'
 
@@ -196,7 +188,6 @@ class MtsDeltaModelBmi(Bmi):
 
         # --- BMI state variables ---
         self._model = None
-        self._states = None
         self._initialized = False
         self._is_warm = False
 
@@ -217,15 +208,20 @@ class MtsDeltaModelBmi(Bmi):
         self.eps = 1e-6
 
         # --- Caching and warmup ---
-        self.req_daily_history = 351  # 351d of daily data
-        self.req_hourly_history = 168  # 7d/168hr of hourly data
-        self.warmup_frequency = 168  # How often to run warmup (every 7d/168hr)
-        self._steps_since_warmup = 0
+        self.req_daily_history = 365  # 365d of previous data for warmup
+        self._hour_in_day = 0  # Track position within current day (0-23)
 
         # --- Cache buffers ---
-        self._hourly_buffer = []  # Rolling window of 168hr
-        self._daily_buffer = []  # Rolling window of 351d daily aggregated data
-        self._day_accumulator = []  # Buffer for a single day of 24hr
+        self._daily_buffer = None  # RingBuffer for rolling window of daily data
+        self._day_accumulator = None  # Buffer for a single day of 24hr
+        self._day_accumulator_ptr = 0
+
+        # --- Current prediction (repeated for 24 hours) ---
+        self._current_prediction = None
+
+        # --- Model states (LSTM hidden/cell, physical states) ---
+        # self._lstm_states = None
+        # self._phy_states = None
 
         # --- Model variables ---
         self._dynamic_var = self._set_value_internal(
@@ -313,23 +309,18 @@ class MtsDeltaModelBmi(Bmi):
         self._set_dtype()
         self.device = self.model_config.get('device', self.device)
 
+        # --- Set warmup period from config ---
+        self.req_daily_history = self.model_config['model'].get('rho', 365)
+
         # --- Load model ---
         self._model = self._load_model()
 
         # --- Buffer initialization ---
-        n_vars = len(
-            self.model_config['model']['nn']['hif_model']['forcings'],
-        )  # self.get_input_item_count()
+        n_vars = len(self.model_config['model']['phy']['forcings'])
 
-        # Offset so daily and hourly buffers don't overlap.
-        self.b_offset = self.req_hourly_history // 24
-
-        self._hourly_buffer = RingBuffer(
-            (self.req_hourly_history + 1, 1, n_vars),
-            dtype=self.np_dtype,
-        )
+        # RingBuffer for daily aggregated data (fixed-size circular buffer)
         self._daily_buffer = RingBuffer(
-            (self.req_daily_history + self.b_offset, 1, n_vars),
+            shape=(self.req_daily_history + 1, 1, n_vars),
             dtype=self.np_dtype,
         )
         self._day_accumulator = np.zeros(
@@ -351,51 +342,56 @@ class MtsDeltaModelBmi(Bmi):
         """(Control function) Advance BMI state by one time step.
 
         NOTE: ngen uses this method for model forward.
+
+        This method:
+        1. Accumulates hourly forcing data
+        2. Every 24 hours, aggregates to daily values and runs prediction
+        3. Returns the current prediction (repeated until new one available)
         """
         t_start = time.time()
 
         # 1. Cache raw data (no normalization) to allow daily aggregation.
         forcing = self._get_current_forcing()
-        self._update_caches(forcing)
+        self._day_accumulator[self._day_accumulator_ptr] = forcing[0]
+        self._day_accumulator_ptr += 1
+        self._hour_in_day += 1
 
-        # 2. Check if we have enough history to run a prediction.
-        #    (We need at least 351 days + 168 hours of data to do first warmup).
-        if self._can_run_warmup():
-            # --- WARMUP ---
-            if self._is_warmup_trigger_step():
-                self._model.dpl_model.phy_model.use_from_cache = False
+        # 2. Check if we've completed a day (24 hours)
+        if self._day_accumulator_ptr == 24:
+            # Aggregate hourly to daily
+            daily_data = self._aggregate_to_daily()
 
+            # Add to daily buffer (RingBuffer handles trimming automatically)
+            self._daily_buffer.append(daily_data[0])  # Shape (1, n_vars) for RingBuffer
+
+            # Reset accumulator
+            self._day_accumulator_ptr = 0
+            self._hour_in_day = 0
+
+            # 3. Check if we have enough history to make a prediction
+            if len(self._daily_buffer) > self.req_daily_history:
                 if self.verbose:
-                    log.info(f"Step {self._timestep}: Running Warmup")
+                    log.info(f"Step {self._timestep}: Running daily prediction")
 
-                # Prepare batch data (excludes current timestep)
-                warmup_dict = self._prepare_input_data(batched=True)
+                # Prepare input data
+                data_dict = self._prepare_input_data()
 
-                # Run batch forward purely for side-effect: priming self.states
-                self._do_forward(warmup_dict, batched=True)
+                # Run prediction
+                predictions = self._do_forward(data_dict)
 
+                # Store prediction to be repeated for next 24 hours
+                self._current_prediction = predictions
                 self._is_warm = True
-                self._steps_since_warmup = 0
 
-            # --- STEP ---
-            if self._is_warm:
-                self._model.dpl_model.phy_model.use_from_cache = True
-
-                # Standard forward pass (single current timestep)
-                # Run prediction for current hour using either fresh primed states
-                # or states carried over from t-1.
-                step_dict = self._prepare_input_data(batched=False)
-                predictions = self._do_forward(step_dict, batched=False)
-
-                self._format_outputs(predictions)
-                self._steps_since_warmup += 1
-            else:
-                self._set_empty_outputs()
-
+        # 4. Format outputs
+        if self._is_warm and self._current_prediction is not None:
+            self._format_outputs(self._current_prediction)
         else:
-            # Buffers are not full yet. Return zeros.
             if self.verbose and (self._timestep % 24 == 0):
-                log.info(f"Step {self._timestep}: Filling buffers...")
+                log.info(
+                    f"Step {self._timestep}: Filling buffers... "
+                    f"({len(self._daily_buffer)}/{self.req_daily_history} days)",
+                )
             self._set_empty_outputs()
 
         self._timestep += 1
@@ -411,31 +407,35 @@ class MtsDeltaModelBmi(Bmi):
         time
             A model time later than the current model time.
         """
-        t_start = time.time()
+        t_start = time.time()  # Renamed to avoid shadowing
 
-        if time < self.get_current_time():
+        if t_start < self.get_current_time():
             log.warning(
-                f"No update performed: end_time ({time}) <= current time ({self.get_current_time()}).",
+                f"No update performed: end_time ({t_start}) <= current time "
+                f"({self.get_current_time()}).",
             )
             return None
 
         n_steps, remainder = divmod(
-            time - self.get_current_time(),
+            t_start - self.get_current_time(),
             self.get_time_step(),
         )
 
         if remainder != 0:
             log.warning(
-                f"End time is not multiple of time step size. Updating until: {time - remainder}",
+                f"End time is not multiple of time step size. "
+                f"Updating until: {t_start - remainder}",
             )
 
         for _ in range(int(n_steps)):
             self.update()
 
         if self.verbose:
-            self._proc_time += time.time() - t_start
+            import time as time_module
+
+            self._proc_time += time_module.time() - t_start
             log.info(
-                f"BMI Update Until took {time.time() - t_start:.4f} s | ",
+                f"BMI Update Until took {time_module.time() - t_start:.4f} s | "
                 f"Total runtime: {self._proc_time:.4f} s",
             )
 
@@ -455,42 +455,32 @@ class MtsDeltaModelBmi(Bmi):
 
     # =========================================================================#
 
-    def _update_caches(self, forcing: NDArray) -> None:
-        """Manages the rolling windows.
+    def _aggregate_to_daily(self) -> NDArray:
+        """Aggregate 24 hours of data to daily values.
 
-        Parameters
-        ----------
-        raw_forcing
-            Current forcing data. Shape (1, space, vars).
+        Returns
+        -------
+        NDArray
+            Daily aggregated forcing data. Shape (1, 1, n_vars).
         """
-        # (1) Add to hourly buffer
-        # Keep exactly 7d/168hr warmup + current hour
-        self._hourly_buffer.append(forcing[0])
+        # P: sum over day
+        prcp = self._day_accumulator[:, :, 0].sum(axis=0, keepdims=True)
 
-        # (2) Add to day accumulator
-        self._day_accumulator[self._day_accumulator_ptr] = forcing[0]
-        self._day_accumulator_ptr += 1
+        # T: mean over day
+        temp = self._day_accumulator[:, :, 1].mean(axis=0, keepdims=True)
 
-        # (3) Check if 24 hours have passed to create a daily entry
-        if self._day_accumulator_ptr == 24:
-            # Aggregate: take mean/sum across time dimension
-            prcp = self._day_accumulator[:, :, 0].sum(axis=0)
-            temp = self._day_accumulator[:, :, 1].mean(axis=0)
-            pet = self._day_accumulator[:, :, 2].sum(axis=0)
+        # PET: sum over day
+        pet = self._day_accumulator[:, :, 2].sum(axis=0, keepdims=True)
 
-            daily_agg = np.stack([prcp, temp, pet], axis=-1)
-
-            # Add to daily buffer
-            self._daily_buffer.append(daily_agg)
-            self._day_accumulator_ptr = 0
+        daily_agg = np.concatenate([prcp, temp, pet], axis=-1)
+        return daily_agg[np.newaxis, ...]  # Shape (1, 1, n_vars)
 
     def _prepare_input_data(
         self,
         batched: bool = False,
     ) -> dict[str, torch.Tensor]:
         """
-        Constructs inputs for either history/cache warmup or single-step
-        inference and normalizes data on-the-fly.
+        Constructs inputs for daily model inference and normalizes data.
 
         All calculations in numpy, converted to torch tensors at the end.
 
@@ -505,69 +495,30 @@ class MtsDeltaModelBmi(Bmi):
         dict
             Dictionary of input tensors for the model.
         """
-        # --- Retrieve data from buffers ---
-        if batched:
-            # CASE 1: BATCH WARMUP
-            # Hourly: We want history UP TO the current step, but NOT including it.
-            raw_hourly = self._hourly_buffer.get_ordered()[:-1]
+        # Get daily buffer: shape (n_days, 1, n_vars)
+        raw_daily = self._daily_buffer.get_ordered()
 
-            # Daily: Just take the full available daily history (up to 351)
-            # **Since daily buffer only updates every 24h, it naturally lags
-            # correctly behind the current hourly window.
-            raw_daily = self._daily_buffer.get_ordered()[: -self.b_offset]
+        # Normalize
+        x_norm = self._normalize(raw_daily, 'dyn_input')
 
-        else:
-            # CASE 2: SINGLE STEP INFERENCE
-            # Hourly: We want ONLY the current timestep (very last entry).
-            raw_hourly = self._hourly_buffer.get_last()
+        # Get static variables
+        c_nn_norm, areas, elev_all, ac_all = self._get_static_var_tensors()
 
-            # Daily: For daily input during a single hourly step, we repeat
-            # the last known daily value or use zeros if architecture implies.
-            raw_daily = self._daily_buffer.get_last()
-
-        # --- Normalize ---
-        x_norm_hourly = self._normalize(raw_hourly, 'dyn_input')
-        x_norm_daily = self._normalize(raw_daily, 'dyn_input_daily')
-
-        # --- Format static variables as tensors ---
-        c_nn_norm, rc_nn_norm, outlet_topo, areas, elev_all, ac_all = (
-            self._get_static_var_tensors()
-        )
-
-        # --- Construct input tensors ---
-        x_nn_norm_high_freq = self._bmi_tensor(x_norm_hourly)
-        x_nn_norm_low_freq = self._bmi_tensor(x_norm_daily)
-
-        x_phy_high_freq = self._bmi_tensor(raw_hourly)
-        x_phy_low_freq = self._bmi_tensor(raw_daily)
+        # Convert to tensors
+        x_nn_norm = self._bmi_tensor(x_norm)
+        x_phy = self._bmi_tensor(raw_daily)
 
         # Append static variables to dynamic inputs
-        c_nn_expanded1 = c_nn_norm.unsqueeze(0).repeat(
-            x_nn_norm_high_freq.shape[0],
-            1,
-            1,
-        )
-        xc_nn_norm_high_freq = torch.cat((x_nn_norm_high_freq, c_nn_expanded1), dim=-1)
-
-        c_nn_expanded2 = c_nn_norm.unsqueeze(0).repeat(
-            x_nn_norm_low_freq.shape[0],
-            1,
-            1,
-        )
-        xc_nn_norm_low_freq = torch.cat((x_nn_norm_low_freq, c_nn_expanded2), dim=-1)
+        c_nn_expanded = c_nn_norm.unsqueeze(0).repeat(x_nn_norm.shape[0], 1, 1)
+        xc_nn_norm = torch.cat((x_nn_norm, c_nn_expanded), dim=-1)
 
         return {
-            'xc_nn_norm_high_freq': xc_nn_norm_high_freq,
-            'x_phy_high_freq': x_phy_high_freq,
+            'xc_nn_norm': xc_nn_norm,
+            'x_phy': x_phy,
             'c_nn_norm': c_nn_norm,
-            'rc_nn_norm': rc_nn_norm,
             'ac_all': ac_all,
             'elev_all': elev_all,
             'areas': areas,
-            'outlet_topo': outlet_topo,
-            # --- Add low freq items for warmup only ---
-            'xc_nn_norm_low_freq': xc_nn_norm_low_freq if batched else None,
-            'x_phy_low_freq': x_phy_low_freq if batched else None,
         }
 
     def _normalize(self, data: NDArray, name: str) -> NDArray:
@@ -605,7 +556,7 @@ class MtsDeltaModelBmi(Bmi):
         NDArray
             Current forcing data. Shape (time, space, vars).
         """
-        var_x_list = self.model_config['model']['nn']['hif_model']['forcings']
+        var_x_list = self.model_config['model']['phy']['forcings']
         hourly_forcing = []
         for var in var_x_list:
             if var == 'PET':
@@ -633,8 +584,6 @@ class MtsDeltaModelBmi(Bmi):
         tuple
             Tensors for:
             - c_nn_norm: Normalized catchment attributes for NN.
-            - rc_nn_norm: Normalized routing catchment attributes for NN.
-            - outlet_topo: Outlet topology matrix.
             - areas: Catchment areas.
             - elev_all: Catchment elevations.
             - ac_all: Catchment upstream areas.
@@ -648,27 +597,11 @@ class MtsDeltaModelBmi(Bmi):
             dtype=self.np_dtype,
         )
 
-        mean_attr_rout = np.asarray(
-            self.norm_stats['mean']['rout_static_input'],
-            dtype=self.np_dtype,
-        )
-        std_attr_rout = np.asarray(
-            self.norm_stats['std']['rout_static_input'],
-            dtype=self.np_dtype,
-        )
-
         while mean_attr.ndim < 2:
             mean_attr = mean_attr[np.newaxis, ...]
             std_attr = std_attr[np.newaxis, ...]
 
-        while mean_attr_rout.ndim < 2:
-            mean_attr_rout = mean_attr_rout[np.newaxis, ...]
-            std_attr_rout = std_attr_rout[np.newaxis, ...]
-
-        var_c_list = self.model_config['model']['nn']['hif_model']['attributes']
-        var_c_list2 = self.model_config['model']['nn']['hif_model']['attributes2']
-
-        outlet_topo = torch.eye(self.n_units)
+        var_c_list = self.model_config['model']['nn']['attributes']
 
         attr = []
         for var in var_c_list:
@@ -680,21 +613,9 @@ class MtsDeltaModelBmi(Bmi):
             )
         attr = np.stack(attr, axis=-1)
 
-        attr_rout = []
-        for var in var_c_list2:
-            attr_rout.append(
-                np.expand_dims(
-                    self._static_var[map_to_external(var)]['value'],
-                    axis=-1,
-                ),
-            )
-        attr_rout = np.stack(attr_rout, axis=-1)
-
         attr_norm = (attr - mean_attr) / (std_attr + self.eps)
-        attr_norm_rout = (attr_rout - mean_attr_rout) / (std_attr_rout + self.eps)
 
         c_nn_norm = self._bmi_tensor(attr_norm)
-        rc_nn_norm = self._bmi_tensor(attr_norm_rout)
         elev_all = self._bmi_tensor(
             self._static_var[map_to_external('meanelevation')]['value'],
         )
@@ -712,46 +633,7 @@ class MtsDeltaModelBmi(Bmi):
         if areas.ndim < 2:
             areas = areas.unsqueeze(0)
 
-        return (c_nn_norm, rc_nn_norm, outlet_topo, areas, elev_all, ac_all)
-
-    # =========================================================================#
-
-    # Logic Helpers
-
-    # =========================================================================#
-
-    def _is_warmup_trigger_step(self) -> bool:
-        """Trigger if we are at the start of a 7-day (freq=168 hour) cycle.
-
-        We also need to ensure we actually have enough history (freq+1 hours)
-        to slice [-freq:-1].
-        """
-        freq = self.warmup_frequency
-        steps_active = self._steps_since_warmup
-
-        # Check if buffer has history + current
-        if len(self._hourly_buffer) <= freq:
-            return False
-
-        # Check if at a daily boundary
-        if self._timestep % 24 != 0:
-            return False
-
-        # Every freq steps after:
-        return (steps_active % freq) == 0
-
-    def _can_run_warmup(self) -> bool:
-        """
-        Check if buffers have enough history to support a warmup run.
-
-        Requires:
-        - 351 days of daily history
-        - 168 hours of hourly history
-        """
-        daily_ready = len(self._daily_buffer) >= self.req_daily_history + self.b_offset
-        hourly_ready = len(self._hourly_buffer) >= self.req_hourly_history
-
-        return daily_ready and hourly_ready
+        return (c_nn_norm, areas, elev_all, ac_all)
 
     # =========================================================================#
 
@@ -798,8 +680,6 @@ class MtsDeltaModelBmi(Bmi):
         ----------
         data_dict
             Dictionary of input tensors for the model.
-        batched
-            Whether to run batched inference (warmup) or single-step.
 
         Returns
         -------
@@ -809,20 +689,38 @@ class MtsDeltaModelBmi(Bmi):
         with torch.no_grad():
             prediction = self._model.dpl_model(data_dict, batched=batched)
             output = {
-                'streamflow': prediction['Qs'].detach().cpu().numpy(),
+                'streamflow': prediction['streamflow'][-1].detach().cpu().numpy(),
             }
+
+            # # # Load cached states if available
+            # # self._model.load_states(self._lstm_states, self._phy_states)
+
+            # # # Forward pass
+            # # prediction = self._model.forward(data_dict, eval=True)
+
+            # # # Cache states for next run
+            # # self._lstm_states, self._phy_states = self._model.get_states()
+
+            # # # Extract streamflow (last timestep after warmup)
+            # # model_name = self.model_config['model']['phy']['name'][0]
+            # output = {
+            #     'streamflow': prediction[model_name]['streamflow'][-1]
+            #     .detach()
+            #     .cpu()
+            #     .numpy(),
+            # }
         return output
 
-    def _load_model(self) -> MtsModelHandler:
+    def _load_model(self) -> ModelHandler:
         """Load a pre-trained model based on the configuration.
 
         Returns
         -------
-        MtsModelHandler
+        ModelHandler
             The loaded δMG model handler.
         """
         try:
-            model = MtsModelHandler(
+            model = ModelHandler(
                 self.model_config,
                 device=self.device,
                 verbose=self.verbose,
@@ -831,15 +729,8 @@ class MtsDeltaModelBmi(Bmi):
             model.dpl_model.eval()
 
             # Enable state caching for stepwise inference (temporary)
-            model.dpl_model.nn_model.lstm_mlp2.cache_states = True
-            model.dpl_model.phy_model.low_freq_model.cache_states = True
-            model.dpl_model.phy_model.high_freq_model.cache_states = True
-
-            model.dpl_model.phy_model.lof_from_cache = True
-            model.dpl_model.phy_model.load_from_cache = True
-
-            # Disable routing
-            model.dpl_model.phy_model.high_freq_model.use_distr_routing = False
+            model.dpl_model.phy_model.cache_states = True
+            model.dpl_model.nn_model.cache_states = True
 
             return model.to(dtype=self.pt_dtype, device=self.device)
         except Exception as e:
@@ -917,10 +808,9 @@ class MtsDeltaModelBmi(Bmi):
         config['sim_dir'] = ''
         config['log_dir'] = ''
 
-        for name in ['hif_model', 'lof_model']:
-            config['model']['phy'][name]['nearzero'] = float(
-                config['model']['phy'][name]['nearzero'],
-            )
+        config['model']['phy']['nearzero'] = float(
+            config['model']['phy']['nearzero'],
+        )
         return config
 
     def set_system_spec(self, config: dict) -> torch.device:
