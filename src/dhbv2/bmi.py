@@ -80,7 +80,7 @@ _static_input_vars = [
 # (3) Output variables (CSDMS standard names)
 # ----------------------------------------- #
 _output_vars = [
-    ('land_surface_water__runoff_volume_flux', 'm3 s-1'),
+    ('land_surface_water__runoff_volume_flux', 'mm d-1'),
 ]
 
 # -------------------------------------------------- #
@@ -770,13 +770,13 @@ class DeltaModelBmi(Bmi):
         except ValueError as e:
             raise ValueError("Normalization statistics not found.") from e
 
-    def _to_external_units(self, name: str, values: list[float]) -> list[float]:
-        """Convert internal model units to external units."""
-        if name == 'atmosphere_water__liquid_equivalent_precipitation_rate':
-            # mm h-1 --> m3 s-1 (depth to volumetric rate)
-            area = self._static_var[map_to_external('catchment__area')]['value']
-            return [v * 1000 / 3600 * area for v in values]
-        return values
+    # def _to_external_units(self, name: str, values: list[float]) -> list[float]:
+    #     """Convert internal model units to external units."""
+    #     if name == 'atmosphere_water__liquid_equivalent_precipitation_rate':
+    #         # mm h-1 --> m3 s-1 (depth to volumetric rate)
+    #         area = self._static_var[map_to_external('catchment__area')]['value']
+    #         return [v * 1000 / 3600 * area for v in values]
+    #     return values
 
     def initialize_config(
         self,
@@ -953,7 +953,7 @@ class DeltaModelBmi(Bmi):
     def get_value(self, name: str, dest: NDArray) -> NDArray:
         """Get a copy of values of the given variable."""
         tmp = self.get_value_ptr(name).flatten()
-        dest[:] = self._to_external_units(name, tmp.tolist())
+        dest[:] = tmp.tolist()
         return dest
 
     def get_value_ptr(self, name: str) -> NDArray:
@@ -975,12 +975,12 @@ class DeltaModelBmi(Bmi):
         2. to write catchment-level output
         """
         tmp = self.get_value_ptr(name).take(inds)
-        dest[:] = self._to_external_units(name, tmp.tolist())
+        dest[:] = tmp.tolist()
 
         if (self._timestep > 24 * 365) and (self._timestep % 1000 == 0):
             log.debug(
                 f"Time {self.get_current_time()} {self.get_time_units()} "
-                f"(step {self._timestep}) | Runoff {tmp[-1]:.4f} m3/s",
+                f"(step {self._timestep}) | Runoff {tmp[-1]:.4f} mm d-1",
             )
 
         return dest
