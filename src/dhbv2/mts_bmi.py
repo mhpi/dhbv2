@@ -79,7 +79,7 @@ _static_input_vars = [
 # (3) Output variables (CSDMS standard names)
 # ----------------------------------------- #
 _output_vars = [
-    ('land_surface_water__runoff_volume_flux', 'mm h-1'),
+    ('land_surface_water__runoff_volume_flux', 'm h-1'),
 ]
 
 # -------------------------------------------------- #
@@ -879,13 +879,16 @@ class MtsDeltaModelBmi(Bmi):
         except ValueError as e:
             raise ValueError("Normalization statistics not found.") from e
 
-    # def _to_external_units(self, name: str, values: list[float]) -> list[float]:
-    #     """Convert internal model units to external units."""
-    #     if name == 'atmosphere_water__liquid_equivalent_precipitation_rate':
-    #         # mm h-1 --> m3 s-1 (depth to volumetric rate)
-    #         area = self._static_var[map_to_external('catchment__area')]['value']
-    #         return [v * 1000 / 3600 * area for v in values]
-    #     return values
+    def _to_external_units(self, name: str, values: list[float]) -> list[float]:
+        """Convert internal model units to external units."""
+        if name == 'atmosphere_water__liquid_equivalent_precipitation_rate':
+            # # mm h-1 --> m3 s-1 (depth to volumetric rate)
+            # area = self._static_var[map_to_external('catchment__area')]['value']
+            # return [v * 1000 / 3600 * area for v in values]
+
+            # mm h-1 --> m h-1
+            return [v / 1000 for v in values]
+        return values
 
     def initialize_config(
         self,
@@ -1063,7 +1066,7 @@ class MtsDeltaModelBmi(Bmi):
     def get_value(self, name: str, dest: NDArray) -> NDArray:
         """Get a copy of values of the given variable."""
         tmp = self.get_value_ptr(name).flatten()
-        dest[:] = tmp.tolist()
+        dest[:] = self._to_external_units(name, tmp.tolist())
         return dest
 
     def get_value_ptr(self, name: str) -> NDArray:
@@ -1085,7 +1088,7 @@ class MtsDeltaModelBmi(Bmi):
         2. to write catchment-level output
         """
         tmp = self.get_value_ptr(name).take(inds)
-        dest[:] = tmp.tolist()
+        dest[:] = self._to_external_units(name, tmp.tolist())
 
         if (self._timestep > 24 * 365) and (self._timestep % 1000 == 0):
             log.debug(
