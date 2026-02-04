@@ -122,7 +122,7 @@ for t in range(t_steps):
 
     if (t > 24 * 365) and (t % 1000 == 0):
         log.info(
-            f" Time {model.get_current_time()} {model.get_time_units()} ({time}, step {t}) | Runoff {runoff_sim[-1]:.4f} m3/s",
+            f" Time {model.get_current_time()} {model.get_time_units()} ({time}, step {t}) | Runoff {runoff_sim[-1]:.4f} m/hr",
         )
 
 

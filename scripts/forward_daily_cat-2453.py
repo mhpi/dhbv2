@@ -131,7 +131,7 @@ for t in range(t_steps):
     if (t > WARMUP_HOURS) and (t % 1000 == 0):
         log.info(
             f" Time {model.get_current_time()} {model.get_time_units()} "
-            f"({time}, step {t}) | Runoff {runoff_sim[-1]:.4f} m3/s",
+            f"({time}, step {t}) | Runoff {runoff_sim[-1]:.4f} m/hr",
         )
 
 
