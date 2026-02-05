@@ -29,16 +29,16 @@ import xarray as xr
 
 from dhbv2.bmi import DeltaModelBmi as Bmi
 
-log = logging.getLogger('BMI_Demo')
+log = logging.getLogger('BMI-demo')
 logging.basicConfig(level=logging.INFO)
 
 
 ### Configuration Settings (single-catchment) ###
 CAT_ID = 'cat-2453'  # Options: cat-2453, cat-2454, cat-2455
 BMI_CONFIG_PATH = f'./ngen_resources/data/dhbv_2/config/bmi_{CAT_ID}.yaml'
-FORCING_PATH = './ngen_resources/data/forcing/camels_subset_2008-01-09 00_00_00_2010-12-30 23_00_00.nc'
+FORCING_PATH = './ngen_resources/data/forcing/forcings.nc'
 SAVE_OUTPUT = True
-SAVE_PATH = f'./output/dhbv_2_daily_{CAT_ID}_runoff.npy'
+SAVE_PATH = f'./output/dhbv_2_{CAT_ID}_runoff.npy'
 ### ----------------------------------------- ###
 
 
@@ -49,12 +49,12 @@ forcing_path = os.path.join(pkg_root, Path(FORCING_PATH))
 
 
 # Create dHBV 2.0 Daily BMI instance
-log.info("Creating Daily BMI instance")
+log.info(" Creating Daily BMI instance")
 model = Bmi(verbose=False)
 
 
 ### BMI initialization ###
-log.info("Initializing BMI")
+log.info(" Initializing BMI")
 model.initialize(config_file=bmi_config_path)
 
 
@@ -80,7 +80,7 @@ runoff_sim = []
 WARMUP_HOURS = 365 * 24
 
 log.info(
-    f"Begin BMI update loop for {t_steps} steps. "
+    f" Begin BMI update loop for {t_steps} steps. "
     f"First 1yr ({WARMUP_HOURS} hours) is model spinup with no output.",
 )
 for t in range(t_steps):
@@ -122,7 +122,7 @@ for t in range(t_steps):
 
     ### BMI update ###
     if t == 0:
-        log.info("First timestep | Initial data loaded")
+        log.info(" First timestep | Initial data loaded")
     model.update()
 
     dest_array = np.zeros(1)
@@ -144,6 +144,6 @@ if SAVE_OUTPUT:
     log.info(f"Saving output to {SAVE_PATH}")
     os.makedirs(os.path.dirname(SAVE_PATH), exist_ok=True)
 
-    # Remove warmup period (first 8760 hours for daily model)
-    np.save(SAVE_PATH, np.array(runoff_sim)[WARMUP_HOURS:])
-    log.info(f"Saved {len(runoff_sim) - WARMUP_HOURS} hourly runoff values")
+    # Warmup period is first 8760 hours
+    np.save(SAVE_PATH, np.array(runoff_sim))
+    log.info(f"Saved {len(runoff_sim)} hourly runoff values")

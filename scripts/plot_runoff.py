@@ -26,9 +26,14 @@ pkg_root = Path(__file__).parent.parent
 ### -------- Settings -------- ###
 # Numpy file with dhbv2 runoff data
 SIM_PATH = f'{pkg_root}/output/dhbv_2_mts_cat-2453_runoff.npy'
+SIM_PATH = f'{pkg_root}/output/dhbv_2_cat-2453_runoff.npy'
 SAVE_PATH = f'{pkg_root}/output/runoff_simulation.png'
 TIME_START = '2008-01-09 00:00:00'
 TIME_END = '2010-12-30 23:00:00'
+
+# Optional: subset the plot to a narrower time window (set to None to plot all)
+PLOT_TIME_START = '2009-01-01'
+PLOT_TIME_END = '2009-12-31'
 ### -------------------------- ###
 
 
@@ -36,6 +41,8 @@ def plot_hydrograph(
     timesteps: pd.DatetimeIndex,
     predictions: Union[NDArray[np.float32], torch.Tensor],
     resample: Literal['d', 'w', 'm', 'y'] = 'd',
+    time_start: Optional[str] = None,
+    time_end: Optional[str] = None,
     title: str = 'Hydrograph',
     ylabel: str = 'Runoff',
     line_label: str = 'Prediction',
@@ -46,13 +53,24 @@ def plot_hydrograph(
     dpi: int = 100,
     save_path: Optional[str] = None,
 ) -> None:
-    """Plot hydrograph for a single catchment (1D time series)."""
+    """Plot hydrograph for a single catchment (1D time series).
+
+    Parameters
+    ----------
+    time_start : str, optional
+        Start of the time window to plot (e.g. '2009-01-01'). If None, uses
+        the beginning of the data.
+    time_end : str, optional
+        End of the time window to plot (e.g. '2009-12-31'). If None, uses
+        the end of the data.
+    """
     # --- 1. Data preparation ---
     if isinstance(predictions, torch.Tensor):
         predictions = predictions.detach().cpu().numpy()
 
     # Flatten data to ensure it is 1D (Time,) and not (Time, 1) or (1, Time)
     predictions = np.ravel(predictions)
+    timesteps = timesteps[: -len(timesteps) + len(predictions)]
 
     if len(predictions) != len(timesteps):
         raise ValueError(
@@ -62,6 +80,12 @@ def plot_hydrograph(
 
     # Create df for resampling
     data = pd.DataFrame({'time': timesteps, 'pred': predictions})
+
+    # Subset to requested time window
+    if time_start is not None:
+        data = data[data['time'] >= pd.Timestamp(time_start)]
+    if time_end is not None:
+        data = data[data['time'] <= pd.Timestamp(time_end)]
 
     # Resample
     data = timestep_resample(data, resolution=resample, method='mean')
@@ -118,8 +142,10 @@ if __name__ == '__main__':
         timesteps=time_index,
         predictions=runoff_sim,
         resample='h',
+        time_start=PLOT_TIME_START,
+        time_end=PLOT_TIME_END,
         title='δHBV2.0 Runoff Simulation',
-        ylabel='Runoff (m3 s-1)',
+        ylabel='Runoff (m h-1)',
         line_label='Simulated Runoff',
         color='blue',
         minor_ticks=True,

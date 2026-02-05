@@ -134,5 +134,6 @@ if SAVE_OUTPUT:
     log.info(f"Saving output to {SAVE_PATH}")
     os.makedirs(os.path.dirname(SAVE_PATH), exist_ok=True)
 
-    # Remove warmup period (first 8592 hours)
-    np.save(SAVE_PATH, np.array(runoff_sim)[8592:])
+    # Warmup period is first 8592 hours
+    np.save(SAVE_PATH, np.array(runoff_sim))
+    log.info(f"Saved {len(runoff_sim)} hourly runoff values")

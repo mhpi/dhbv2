@@ -498,8 +498,9 @@ class DeltaModelBmi(Bmi):
         # Get daily buffer: shape (n_days, 1, n_vars)
         raw_daily = self._daily_buffer.get_ordered()
 
-        # Normalize
-        x_norm = self._normalize(raw_daily, 'dyn_input')
+        # Normalize using forcing variable names
+        var_x_list = self.model_config['model']['phy']['forcings']
+        x_norm = self._normalize(raw_daily, var_x_list)
 
         # Get static variables
         c_nn_norm, areas, elev_all, ac_all = self._get_static_var_tensors()
@@ -521,7 +522,7 @@ class DeltaModelBmi(Bmi):
             'areas': areas,
         }
 
-    def _normalize(self, data: NDArray, name: str) -> NDArray:
+    def _normalize(self, data: NDArray, names: list[str]) -> NDArray:
         """Normalize model inputs with saved training data statistics.
 
         Gaussian norm: (X - Mean) / Std.
@@ -530,16 +531,18 @@ class DeltaModelBmi(Bmi):
         ----------
         data
             Raw input data to normalize. Shape (time, space, vars).
-        name
-            Name of the variable to normalize.
+        names
+            List of variable names (one per last-axis element of *data*)
+            whose statistics are looked up from ``self.norm_stats``.
+            Each entry in ``norm_stats`` is ``[min, max, mean, std]``.
 
         Returns
         -------
         NDArray
             Normalized data. Shape (time, space, vars).
         """
-        mean = np.asarray(self.norm_stats['mean'][name])  # , dtype=self.np_dtype)
-        std = np.asarray(self.norm_stats['std'][name])  # , dtype=self.np_dtype)
+        mean = np.asarray([self.norm_stats[v][2] for v in names])
+        std = np.asarray([self.norm_stats[v][3] for v in names])
 
         while mean.ndim < data.ndim:
             mean = mean[np.newaxis, ...]
@@ -588,20 +591,20 @@ class DeltaModelBmi(Bmi):
             - elev_all: Catchment elevations.
             - ac_all: Catchment upstream areas.
         """
+        var_c_list = self.model_config['model']['nn']['attributes']
+
         mean_attr = np.asarray(
-            self.norm_stats['mean']['static_input'],
+            [self.norm_stats[v][2] for v in var_c_list],
             dtype=self.np_dtype,
         )
         std_attr = np.asarray(
-            self.norm_stats['std']['static_input'],
+            [self.norm_stats[v][3] for v in var_c_list],
             dtype=self.np_dtype,
         )
 
         while mean_attr.ndim < 2:
             mean_attr = mean_attr[np.newaxis, ...]
             std_attr = std_attr[np.newaxis, ...]
-
-        var_c_list = self.model_config['model']['nn']['attributes']
 
         attr = []
         for var in var_c_list:
@@ -687,7 +690,7 @@ class DeltaModelBmi(Bmi):
             Dictionary of model outputs.
         """
         with torch.no_grad():
-            prediction = self._model.dpl_model(data_dict, batched=batched)
+            prediction = self._model.model_dict['Hbv_2'](data_dict, batched=batched)
             output = {
                 'streamflow': prediction['streamflow'][-1].detach().cpu().numpy(),
             }
@@ -726,11 +729,11 @@ class DeltaModelBmi(Bmi):
                 verbose=self.verbose,
             )
             model.load_model(epoch=self.model_config['test']['test_epoch'])
-            model.dpl_model.eval()
+            model.eval()
 
             # Enable state caching for stepwise inference (temporary)
-            model.dpl_model.phy_model.cache_states = True
-            model.dpl_model.nn_model.cache_states = True
+            model.model_dict['Hbv_2'].phy_model.cache_states = True
+            model.model_dict['Hbv_2'].nn_model.cache_states = True
 
             return model.to(dtype=self.pt_dtype, device=self.device)
         except Exception as e:
@@ -814,6 +817,12 @@ class DeltaModelBmi(Bmi):
         config['model']['phy']['nearzero'] = float(
             config['model']['phy']['nearzero'],
         )
+
+        # Propagate base-level cache_states to sub-model configs
+        cache_states = config.get('cache_states', False)
+        config['model']['phy']['cache_states'] = cache_states
+        config['model']['nn']['cache_states'] = cache_states
+
         return config
 
     def set_system_spec(self, config: dict) -> torch.device:
