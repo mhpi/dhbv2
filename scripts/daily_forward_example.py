@@ -36,7 +36,7 @@ logging.basicConfig(level=logging.INFO)
 ### Configuration Settings (single-catchment) ###
 CAT_ID = 'cat-2453'  # Options: cat-2453, cat-2454, cat-2455
 BMI_CONFIG_PATH = f'./ngen_resources/data/dhbv_2/config/bmi_{CAT_ID}.yaml'
-FORCING_PATH = './ngen_resources/data/forcing/forcings.nc'
+FORCING_PATH = './ngen_resources/data/forcing/camels_subset_2008-01-09 00_00_00_2010-12-30 23_00_00.nc'
 SAVE_OUTPUT = True
 SAVE_PATH = f'./output/dhbv_2_{CAT_ID}_runoff.npy'
 ### ----------------------------------------- ###
