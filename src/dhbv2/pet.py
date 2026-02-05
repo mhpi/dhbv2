@@ -192,7 +192,7 @@ def penman_monteith_pet(
     # Estimate upwelling longwave w/ Stefan–Boltzmann
     sigma = 4.903e-9 / 24.0  # MJ/K4/m2/hr
 
-    Rl_up = sigma * (temp**4)  # approximation w/o emissivity
+    Rl_up = sigma * ((temp + 273.15) ** 4)  # approximation w/o emissivity
 
     Rn = (1 - albedo) * Rs + (Rl_down - Rl_up)
 

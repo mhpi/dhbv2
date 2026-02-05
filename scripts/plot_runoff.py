@@ -34,6 +34,8 @@ TIME_END = '2010-12-30 23:00:00'
 # Optional: subset the plot to a narrower time window (set to None to plot all)
 PLOT_TIME_START = '2009-01-01'
 PLOT_TIME_END = '2009-12-31'
+PLOT_TIME_START = '2009-03-01'
+PLOT_TIME_END = '2009-06-30'
 ### -------------------------- ###
 
 

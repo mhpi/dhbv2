@@ -403,30 +403,30 @@ class MtsDeltaModelBmi(Bmi):
         if self.verbose:
             self._proc_time += time.time() - t_start
 
-    def update_until(self, time: float) -> None:
+    def update_until(self, end_time: float) -> None:
         """(Control function) Advance BMI state until the given time.
 
         Parameters
         ----------
-        time
+        end_time
             A model time later than the current model time.
         """
         t_start = time.time()
 
-        if time < self.get_current_time():
+        if end_time < self.get_current_time():
             log.warning(
-                f"No update performed: end_time ({time}) <= current time ({self.get_current_time()}).",
+                f"No update performed: end_time ({end_time}) <= current time ({self.get_current_time()}).",
             )
             return None
 
         n_steps, remainder = divmod(
-            time - self.get_current_time(),
+            end_time - self.get_current_time(),
             self.get_time_step(),
         )
 
         if remainder != 0:
             log.warning(
-                f"End time is not multiple of time step size. Updating until: {time - remainder}",
+                f"End time is not multiple of time step size. Updating until: {end_time - remainder}",
             )
 
         for _ in range(int(n_steps)):

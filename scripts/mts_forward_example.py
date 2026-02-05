@@ -28,8 +28,8 @@ logging.basicConfig(level=logging.INFO)
 
 ### Configuration Settings (single-catchment) ###
 CAT_ID = 'cat-2453'  # Options: cat-2453, cat-2454, cat-2455
-BMI_CONFIG_PATH = f'./ngen_resources/data/dhbv_2_mts/config/{CAT_ID}.yaml'
-FORCING_PATH = './ngen_resources/data/forcing/camels_subset_2008-01-09 00_00_00_2010-12-30 23_00_00.nc'
+BMI_CONFIG_PATH = f'./ngen_resources/data/dhbv_2_mts/config/bmi_{CAT_ID}.yaml'
+FORCING_PATH = './ngen_resources/data/forcing/forcings.nc'
 SAVE_OUTPUT = True
 SAVE_PATH = f'./output/dhbv_2_mts_{CAT_ID}_runoff.npy'
 ### ----------------------------------------- ###
@@ -42,27 +42,27 @@ forcing_path = os.path.join(pkg_root, Path(FORCING_PATH))
 
 
 # Create dHBV 2.0 BMI instance
-log.info("Creating BMI instance")
+log.info(" Creating BMI instance")
 model = Bmi(verbose=False)
 
 
 ### BMI initialization ###
-log.info("Initializing BMI")
+log.info(" Initializing BMI")
 model.initialize(config_file=bmi_config_path)
 
 
-log.info(f"Preparing data for catchment ID: {CAT_ID}")
+log.info(f" Preparing data for catchment ID: {CAT_ID}")
 ds = xr.open_dataset(forcing_path).set_coords('ids').swap_dims({'catchment-id': 'ids'})
 forcings = ds.sel(ids=CAT_ID)
 t_steps = len(forcings['time'])
 
 # Maintain strict typing of forcing arrays
-precip = forcings['precip_rate'].values.astype(np.float64)  # precip_rate[mm h-1]
-temp = forcings['TMP_2maboveground'].values.astype(np.float64)
+precip = forcings['precip_rate'].values.astype(np.float64) * 3600.0  # mm/s to mm/hr
+temp = forcings['TMP_2maboveground'].values.astype(np.float64)  # degC
 spfh = forcings['SPFH_2maboveground'].values.astype(np.float64)
 dlwrf = forcings['DLWRF_surface'].values.astype(np.float64)
 dswrf = forcings['DSWRF_surface'].values.astype(np.float64)
-pres = forcings['PRES_surface'].values.astype(np.float64)
+pres = forcings['PRES_surface'].values.astype(np.float64) / 1000.0  # Pa to kPa
 ugrd_10m = forcings['UGRD_10maboveground'].values.astype(np.float64)
 vgrd_10m = forcings['VGRD_10maboveground'].values.astype(np.float64)
 
@@ -70,7 +70,7 @@ vgrd_10m = forcings['VGRD_10maboveground'].values.astype(np.float64)
 runoff_sim = []
 
 log.info(
-    f"Begin BMI update loop for {t_steps} steps. "
+    f" Begin BMI update loop for {t_steps} steps. "
     f"First 1yr is model spinup with no output.",
 )
 for t in range(t_steps):
@@ -113,7 +113,7 @@ for t in range(t_steps):
 
     ### BMI update ###
     if t == 0:
-        log.info("First timestep | Initial data loaded")
+        log.info(" First timestep | Initial data loaded")
     model.update()
 
     dest_array = np.zeros(1)
@@ -122,7 +122,8 @@ for t in range(t_steps):
 
     if (t > 24 * 365) and (t % 1000 == 0):
         log.info(
-            f" Time {model.get_current_time()} {model.get_time_units()} ({time}, step {t}) | Runoff {runoff_sim[-1]:.4f} m/hr",
+            f" Time {model.get_current_time()} {model.get_time_units()} "
+            f"({time}, step {t}) | Runoff {runoff_sim[-1] * 1000:.4f} mm/hr",
         )
 
 

@@ -2,7 +2,10 @@
 BMI wrapper for interfacing δHBV2.0 (daily) with the NOAA-OWP/ngen framework.
 
 This BMI receives hourly inputs from ngen, aggregates them to daily values,
-and makes a daily prediction (then repeated for each of the following 24 hours until a new prediction is made).
+and runs inference using a warmup + sequential strategy: a batched forward
+pass primes LSTM and HBV states, then each subsequent day runs a single-step
+forward using cached states. Daily predictions are repeated for each of the
+following 24 hourly outputs.
 
 @Leo Lonzarich
 """
@@ -80,7 +83,7 @@ _static_input_vars = [
 # (3) Output variables (CSDMS standard names)
 # ----------------------------------------- #
 _output_vars = [
-    ('land_surface_water__runoff_volume_flux', 'm d-1'),
+    ('land_surface_water__runoff_volume_flux', 'm h-1'),
 ]
 
 # -------------------------------------------------- #
@@ -151,10 +154,11 @@ class DeltaModelBmi(Bmi):
     (δHBV2.0 Daily BMI) NextGen-compatible, differentiable, physics-informed ML
     rainfall-runoff model for hydrologic forecasting (Song et al., 2025).
 
-    A daily version of the δHBV2.0 model that receives hourly inputs from ngen,
-    aggregates them to daily values, and makes predictions at the end of each
-    day. Predictions are repeated for all 24 hourly outputs until a new
-    prediction is available.
+    A daily version of the δHBV2.0 model that receives hourly inputs from ngen
+    and aggregates them to daily values. Once enough history is accumulated
+    (default 365 days), a batched warmup primes LSTM and HBV states. Each
+    subsequent day runs a single-step sequential forward using cached states.
+    Daily predictions are repeated for all 24 hourly outputs.
 
     Parameters
     ----------
@@ -218,10 +222,6 @@ class DeltaModelBmi(Bmi):
 
         # --- Current prediction (repeated for 24 hours) ---
         self._current_prediction = None
-
-        # --- Model states (LSTM hidden/cell, physical states) ---
-        # self._lstm_states = None
-        # self._phy_states = None
 
         # --- Model variables ---
         self._dynamic_var = self._set_value_internal(
@@ -344,9 +344,11 @@ class DeltaModelBmi(Bmi):
         NOTE: ngen uses this method for model forward.
 
         This method:
-        1. Accumulates hourly forcing data
-        2. Every 24 hours, aggregates to daily values and runs prediction
-        3. Returns the current prediction (repeated until new one available)
+        1. Accumulates hourly forcing data into a daily accumulator.
+        2. Every 24 hours, aggregates to daily values and adds to buffer.
+        3. Once enough history exists, runs a batched warmup to prime LSTM
+           and HBV states, then switches to sequential single-day inference.
+        4. Daily predictions are repeated for 24 hourly outputs.
         """
         t_start = time.time()
 
@@ -356,34 +358,39 @@ class DeltaModelBmi(Bmi):
         self._day_accumulator_ptr += 1
         self._hour_in_day += 1
 
-        # 2. Check if we've completed a day (24 hours)
+        # 2. Check if we've completed a day (24 hours).
         if self._day_accumulator_ptr == 24:
-            # Aggregate hourly to daily
             daily_data = self._aggregate_to_daily()
-
-            # Add to daily buffer (RingBuffer handles trimming automatically)
-            self._daily_buffer.append(daily_data[0])  # Shape (1, n_vars) for RingBuffer
-
-            # Reset accumulator
+            self._daily_buffer.append(daily_data[0])
             self._day_accumulator_ptr = 0
             self._hour_in_day = 0
 
-            # 3. Check if we have enough history to make a prediction
+            # 3. Run model if we have enough daily history.
             if len(self._daily_buffer) > self.req_daily_history:
-                if self.verbose:
-                    log.info(f"Step {self._timestep}: Running daily prediction")
+                if not self._is_warm:
+                    # --- WARMUP (batched) ---
+                    # First time: run full history to prime LSTM + HBV states.
+                    if self.verbose:
+                        log.info(
+                            f"Step {self._timestep}: Running batched warmup "
+                            f"({len(self._daily_buffer)} days)",
+                        )
+                    warmup_dict = self._prepare_input_data(batched=True)
+                    predictions = self._do_forward(warmup_dict)
+                    self._is_warm = True
+                else:
+                    # --- SEQUENTIAL (single step) ---
+                    # Subsequent days: run only the latest day with cached states.
+                    if self.verbose:
+                        log.info(
+                            f"Step {self._timestep}: Running sequential prediction",
+                        )
+                    step_dict = self._prepare_input_data(batched=False)
+                    predictions = self._do_forward(step_dict)
 
-                # Prepare input data
-                data_dict = self._prepare_input_data()
-
-                # Run prediction
-                predictions = self._do_forward(data_dict)
-
-                # Store prediction to be repeated for next 24 hours
                 self._current_prediction = predictions
-                self._is_warm = True
 
-        # 4. Format outputs
+        # 4. Format outputs (repeat daily prediction for all 24 hourly outputs).
         if self._is_warm and self._current_prediction is not None:
             self._format_outputs(self._current_prediction)
         else:
@@ -399,43 +406,41 @@ class DeltaModelBmi(Bmi):
         if self.verbose:
             self._proc_time += time.time() - t_start
 
-    def update_until(self, time: float) -> None:
+    def update_until(self, end_time: float) -> None:
         """(Control function) Advance BMI state until the given time.
 
         Parameters
         ----------
-        time
+        end_time
             A model time later than the current model time.
         """
-        t_start = time.time()  # Renamed to avoid shadowing
+        t_start = time.time()
 
-        if t_start < self.get_current_time():
+        if end_time < self.get_current_time():
             log.warning(
-                f"No update performed: end_time ({t_start}) <= current time "
+                f"No update performed: end_time ({end_time}) <= current time "
                 f"({self.get_current_time()}).",
             )
             return None
 
         n_steps, remainder = divmod(
-            t_start - self.get_current_time(),
+            end_time - self.get_current_time(),
             self.get_time_step(),
         )
 
         if remainder != 0:
             log.warning(
                 f"End time is not multiple of time step size. "
-                f"Updating until: {t_start - remainder}",
+                f"Updating until: {end_time - remainder}",
             )
 
         for _ in range(int(n_steps)):
             self.update()
 
         if self.verbose:
-            import time as time_module
-
-            self._proc_time += time_module.time() - t_start
+            self._proc_time += time.time() - t_start
             log.info(
-                f"BMI Update Until took {time_module.time() - t_start:.4f} s | "
+                f"BMI Update Until took {time.time() - t_start:.4f} s | "
                 f"Total runtime: {self._proc_time:.4f} s",
             )
 
@@ -487,16 +492,19 @@ class DeltaModelBmi(Bmi):
         Parameters
         ----------
         batched
-            If True, prepares data for warmup (batch mode).
-            If False, prepares data for single-step inference (sequential).
+            If True, prepares full history for warmup (batch mode).
+            If False, prepares only the latest day for sequential inference.
 
         Returns
         -------
         dict
             Dictionary of input tensors for the model.
         """
-        # Get daily buffer: shape (n_days, 1, n_vars)
-        raw_daily = self._daily_buffer.get_ordered()
+        # Get daily data: shape (n_days, 1, n_vars)
+        if batched:
+            raw_daily = self._daily_buffer.get_ordered()
+        else:
+            raw_daily = self._daily_buffer.get_last()
 
         # Normalize using forcing variable names
         var_x_list = self.model_config['model']['phy']['forcings']
@@ -675,9 +683,11 @@ class DeltaModelBmi(Bmi):
     def _do_forward(
         self,
         data_dict: dict[str, torch.Tensor],
-        batched: bool = True,
     ) -> dict[str, NDArray]:
         """Forward model on the pre-formatted dictionary.
+
+        State caching (LSTM hidden/cell and HBV physics states) is handled
+        internally by the submodels when ``cache_states=True``.
 
         Parameters
         ----------
@@ -690,28 +700,10 @@ class DeltaModelBmi(Bmi):
             Dictionary of model outputs.
         """
         with torch.no_grad():
-            prediction = self._model.model_dict['Hbv_2'](data_dict, batched=batched)
+            prediction = self._model.model_dict['Hbv_2'](data_dict)
             output = {
                 'streamflow': prediction['streamflow'][-1].detach().cpu().numpy(),
             }
-
-            # # # Load cached states if available
-            # # self._model.load_states(self._lstm_states, self._phy_states)
-
-            # # # Forward pass
-            # # prediction = self._model.forward(data_dict, eval=True)
-
-            # # # Cache states for next run
-            # # self._lstm_states, self._phy_states = self._model.get_states()
-
-            # # # Extract streamflow (last timestep after warmup)
-            # # model_name = self.model_config['model']['phy']['name'][0]
-            # output = {
-            #     'streamflow': prediction[model_name]['streamflow'][-1]
-            #     .detach()
-            #     .cpu()
-            #     .numpy(),
-            # }
         return output
 
     def _load_model(self) -> ModelHandler:
@@ -731,11 +723,12 @@ class DeltaModelBmi(Bmi):
             model.load_model(epoch=self.model_config['test']['test_epoch'])
             model.eval()
 
-            # Enable state caching for stepwise inference (temporary)
+            # Enable state caching for stepwise inference.
             model.model_dict['Hbv_2'].phy_model.cache_states = True
             model.model_dict['Hbv_2'].nn_model.cache_states = True
+            model.model_dict['Hbv_2'].nn_model.lstminv.cache_states = True
 
-            return model.to(dtype=self.pt_dtype, device=self.device)
+            return model.model_dict['Hbv_2'].to(dtype=self.pt_dtype, device=self.device)
         except Exception as e:
             raise RuntimeError(f"Failed to load trained model: {e}") from e
 
@@ -775,13 +768,13 @@ class DeltaModelBmi(Bmi):
 
     def _to_external_units(self, name: str, values: list[float]) -> list[float]:
         """Convert internal model units to external units."""
-        if name == 'atmosphere_water__liquid_equivalent_precipitation_rate':
+        if name == 'land_surface_water__runoff_volume_flux':
             # # mm h-1 --> m3 s-1 (depth to volumetric rate)
             # area = self._static_var[map_to_external('catchment__area')]['value']
             # return [v * 1000 / 3600 * area for v in values]
 
-            # mm h-1 --> m h-1
-            return [v / 1000 for v in values]
+            # mm d-1 --> m h-1
+            return [v / 1000 / 24 for v in values]
         return values
 
     def initialize_config(
