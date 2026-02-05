@@ -10,6 +10,7 @@ following 24 hourly outputs.
 @Leo Lonzarich
 """
 
+import datetime
 import json
 import os
 import time
@@ -24,7 +25,7 @@ from dmg.core import Dates
 from numpy.typing import NDArray
 
 from dhbv2.log import configure_logging, log
-from dhbv2.pet import penman_monteith_pet
+from dhbv2.pet import hargreaves_pet, penman_monteith_pet
 from dhbv2.utils import RingBuffer
 
 root_path = os.path.dirname(os.path.abspath(__file__))
@@ -213,12 +214,12 @@ class DeltaModelBmi(Bmi):
 
         # --- Caching and warmup ---
         self.req_daily_history = 365  # 365d of previous data for warmup
-        self._hour_in_day = 0  # Track position within current day (0-23)
+        self._start_hour = 0  # Hour of day when simulation starts (0-23)
+        self._day_aligned = True  # Whether accumulator is aligned to day boundary
 
         # --- Cache buffers ---
         self._daily_buffer = None  # RingBuffer for rolling window of daily data
         self._day_accumulator = None  # Buffer for a single day of 24hr
-        self._day_accumulator_ptr = 0
 
         # --- Current prediction (repeated for 24 hours) ---
         self._current_prediction = None
@@ -236,6 +237,12 @@ class DeltaModelBmi(Bmi):
             _output_vars,
             self._bmi_array([0.0]),
         )
+
+        # --- PET method ---
+        self._pet_method = 'penman_monteith'
+        self._latitude_rad = None  # Latitude in radians (for Hargreaves)
+        self._start_date = None  # Simulation start date (for Hargreaves DOY)
+        self._day_count = 0  # Elapsed days since simulation start
 
         # --- Other ---
         self.norm_stats = None
@@ -305,12 +312,45 @@ class DeltaModelBmi(Bmi):
             'time_step_size',
             self._time_step_size,
         )
+        self._start_hour = int(self.bmi_config.get('start_hour', 0))
+        self._day_aligned = self._start_hour == 0
         self._dtype = self.bmi_config.get('dtype', self._dtype)
         self._set_dtype()
         self.device = self.model_config.get('device', self.device)
 
         # --- Set warmup period from config ---
         self.req_daily_history = self.model_config['model'].get('rho', 365)
+
+        # --- PET method configuration ---
+        self._pet_method = self.bmi_config.get('pet_method', 'penman_monteith')
+        if self._pet_method == 'hargreaves':
+            lat = self.bmi_config.get('latitude')
+            if lat is None:
+                raise ValueError(
+                    "'latitude' (degrees) is required in BMI config "
+                    "when pet_method is 'hargreaves'.",
+                )
+            self._latitude_rad = np.deg2rad(float(lat))
+
+            start_date_str = self.bmi_config.get('start_date')
+            if start_date_str is None:
+                raise ValueError(
+                    "'start_date' (YYYY/MM/DD) is required in BMI config "
+                    "when pet_method is 'hargreaves'.",
+                )
+            self._start_date = datetime.datetime.strptime(
+                start_date_str,
+                '%Y/%m/%d',
+            )
+            # If simulation starts mid-day, the first complete calendar day
+            # (hours 0-23) is the day after start_date.
+            if self._start_hour > 0:
+                self._start_date += datetime.timedelta(days=1)
+        elif self._pet_method != 'penman_monteith':
+            raise ValueError(
+                f"Unknown pet_method '{self._pet_method}'. "
+                f"Must be 'penman_monteith' or 'hargreaves'.",
+            )
 
         # --- Load model ---
         self._model = self._load_model()
@@ -327,7 +367,6 @@ class DeltaModelBmi(Bmi):
             (24, 1, n_vars),
             dtype=self.np_dtype,
         )
-        self._day_accumulator_ptr = 0
 
         self._initialized = True
 
@@ -352,43 +391,46 @@ class DeltaModelBmi(Bmi):
         """
         t_start = time.time()
 
+        current_hour = (self._start_hour + self._timestep) % 24
+
         # 1. Cache raw data (no normalization) to allow daily aggregation.
         forcing = self._get_current_forcing()
-        self._day_accumulator[self._day_accumulator_ptr] = forcing[0]
-        self._day_accumulator_ptr += 1
-        self._hour_in_day += 1
+        self._day_accumulator[current_hour] = forcing[0]
 
-        # 2. Check if we've completed a day (24 hours).
-        if self._day_accumulator_ptr == 24:
-            daily_data = self._aggregate_to_daily()
-            self._daily_buffer.append(daily_data[0])
-            self._day_accumulator_ptr = 0
-            self._hour_in_day = 0
+        # 2. Check if we've completed a full calendar day (hour 23 processed).
+        if current_hour == 23:
+            if self._day_aligned:
+                daily_data = self._aggregate_to_daily()
+                self._daily_buffer.append(daily_data[0])
+                self._day_count += 1
 
-            # 3. Run model if we have enough daily history.
-            if len(self._daily_buffer) > self.req_daily_history:
-                if not self._is_warm:
-                    # --- WARMUP (batched) ---
-                    # First time: run full history to prime LSTM + HBV states.
-                    if self.verbose:
-                        log.info(
-                            f"Step {self._timestep}: Running batched warmup "
-                            f"({len(self._daily_buffer)} days)",
-                        )
-                    warmup_dict = self._prepare_input_data(batched=True)
-                    predictions = self._do_forward(warmup_dict)
-                    self._is_warm = True
-                else:
-                    # --- SEQUENTIAL (single step) ---
-                    # Subsequent days: run only the latest day with cached states.
-                    if self.verbose:
-                        log.info(
-                            f"Step {self._timestep}: Running sequential prediction",
-                        )
-                    step_dict = self._prepare_input_data(batched=False)
-                    predictions = self._do_forward(step_dict)
+                # 3. Run model if we have enough daily history.
+                if len(self._daily_buffer) > self.req_daily_history:
+                    if not self._is_warm:
+                        # --- WARMUP (batched) ---
+                        # First time: run full history to prime LSTM + HBV states.
+                        if self.verbose:
+                            log.info(
+                                f"Step {self._timestep}: Running batched warmup "
+                                f"({len(self._daily_buffer)} days)",
+                            )
+                        warmup_dict = self._prepare_input_data(batched=True)
+                        predictions = self._do_forward(warmup_dict)
+                        self._is_warm = True
+                    else:
+                        # --- SEQUENTIAL (single step) ---
+                        # Subsequent days: run only the latest day with cached states.
+                        if self.verbose:
+                            log.info(
+                                f"Step {self._timestep}: Running sequential prediction",
+                            )
+                        step_dict = self._prepare_input_data(batched=False)
+                        predictions = self._do_forward(step_dict)
 
-                self._current_prediction = predictions
+                    self._current_prediction = predictions
+            else:
+                # First partial day (start_hour != 0): discard and align.
+                self._day_aligned = True
 
         # 4. Format outputs (repeat daily prediction for all 24 hourly outputs).
         if self._is_warm and self._current_prediction is not None:
@@ -474,8 +516,32 @@ class DeltaModelBmi(Bmi):
         # T: mean over day
         temp = self._day_accumulator[:, :, 1].mean(axis=0, keepdims=True)
 
-        # PET: sum over day
-        pet = self._day_accumulator[:, :, 2].sum(axis=0, keepdims=True)
+        # PET
+        if self._pet_method == 'hargreaves':
+            # Derive daily tmin/tmax/tmean from the 24 hourly readings.
+            temps = self._day_accumulator[:, :, 1]  # (24, 1)
+            tmin = temps.min(axis=0)  # (1,)
+            tmax = temps.max(axis=0)  # (1,)
+            tmean = temps.mean(axis=0)  # (1,)
+
+            current_date = self._start_date + datetime.timedelta(
+                days=self._day_count,
+            )
+            doy = np.array(
+                [current_date.timetuple().tm_yday],
+                dtype=self.np_dtype,
+            )
+
+            pet = hargreaves_pet(
+                tmin=tmin,
+                tmax=tmax,
+                tmean=tmean,
+                lat=self._latitude_rad,
+                day_of_year=doy,
+            ).reshape(1, -1)  # (1, 1)
+        else:
+            # Penman-Monteith: sum hourly PET over day
+            pet = self._day_accumulator[:, :, 2].sum(axis=0, keepdims=True)
 
         daily_agg = np.concatenate([prcp, temp, pet], axis=-1)
         return daily_agg[np.newaxis, ...]  # Shape (1, 1, n_vars)
@@ -571,16 +637,22 @@ class DeltaModelBmi(Bmi):
         hourly_forcing = []
         for var in var_x_list:
             if var == 'PET':
-                # Calculate PET on-the-fly (would be nice to do in parallel)
-                val = penman_monteith_pet(
-                    temp=self._dynamic_var[map_to_external('T')]['value'],
-                    spfh=self._dynamic_var[map_to_external('SPFH')]['value'],
-                    dlwrf=self._dynamic_var[map_to_external('DLWRF')]['value'],
-                    dswrf=self._dynamic_var[map_to_external('DSWRF')]['value'],
-                    pres=self._dynamic_var[map_to_external('PRES')]['value'],
-                    ugrd_10m=self._dynamic_var[map_to_external('U')]['value'],
-                    vgrd_10m=self._dynamic_var[map_to_external('V')]['value'],
-                )
+                if self._pet_method == 'hargreaves':
+                    # Hargreaves PET is computed at daily aggregation; store placeholder.
+                    val = np.zeros_like(
+                        self._dynamic_var[map_to_external('T')]['value'],
+                    )
+                else:
+                    # Calculate Penman-Monteith PET on-the-fly
+                    val = penman_monteith_pet(
+                        temp=self._dynamic_var[map_to_external('T')]['value'],
+                        spfh=self._dynamic_var[map_to_external('SPFH')]['value'],
+                        dlwrf=self._dynamic_var[map_to_external('DLWRF')]['value'],
+                        dswrf=self._dynamic_var[map_to_external('DSWRF')]['value'],
+                        pres=self._dynamic_var[map_to_external('PRES')]['value'],
+                        ugrd_10m=self._dynamic_var[map_to_external('U')]['value'],
+                        vgrd_10m=self._dynamic_var[map_to_external('V')]['value'],
+                    )
             else:
                 val = self._dynamic_var[map_to_external(var)]['value']  # [time, space]
             hourly_forcing.append(val)
@@ -700,7 +772,7 @@ class DeltaModelBmi(Bmi):
             Dictionary of model outputs.
         """
         with torch.no_grad():
-            prediction = self._model.model_dict['Hbv_2'](data_dict)
+            prediction = self._model(data_dict)
             output = {
                 'streamflow': prediction['streamflow'][-1].detach().cpu().numpy(),
             }

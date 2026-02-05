@@ -18,11 +18,11 @@ def hargreaves_pet(
     Parameters
     ----------
     tmin
-        Minimum daily temperature (°C)
+        Minimum daily temperature (degC)
     tmax
-        Maximum daily temperature (°C)
+        Maximum daily temperature (degC)
     tmean
-        Mean daily temperature (°C)
+        Mean daily temperature (degC)
     lat
         Latitude (degrees)
     day_of_year
