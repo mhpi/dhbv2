@@ -2,7 +2,7 @@
 
 <p align="center">
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.9--3.13-blue?labelColor=333333" alt="Python"></a>
-  <a href="https://pypi.org/project/dhbv2/"><img src="https://img.shields.io/pypi/v/dhbv2?logo=pypi&logoColor=white&labelColor=333333" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/dhbv2/"><img src="https://img.shields.io/pypi/v/dhbv2?logo=pypi&logoColor=white&labelColor=333333&cacheSeconds=60" alt="PyPI version"></a>
   <a href="https://pypi.org/project/torch/"><img src="https://img.shields.io/badge/dynamic/json?label=PyTorch&query=info.version&url=https%3A%2F%2Fpypi.org%2Fpypi%2Ftorch%2Fjson&logo=pytorch&color=EE4C2C&logoColor=F900FF&labelColor=333333" alt="PyTorch"></a>
 </p>
 
