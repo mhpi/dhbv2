@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=69.0", "setuptools-scm>=8.0"]
-build-backend = "setuptools.build_meta"
+build-backend = "hatchling.build"
+requires = ["hatchling", "hatch-vcs"]
 
 [project]
 name = "dhbv2"
@@ -19,35 +19,60 @@ maintainers = [
 ]
 requires-python = ">=3.9.0"
 dynamic = ["version"]
+keywords = [
+    "differentiable-modeling",
+    "pytorch",
+    "hydrology",
+    "nextgen",
+    "bmi",
+    "rainfall-runoff",
+    "scientific-computing",
+]
 dependencies = [
     "bmipy",
-    "dmg @ git+https://github.com/mhpi/generic_deltamodel.git@master",
-    "hydrodl2 @ git+https://github.com/mhpi/hydrodl2.git@master",
+    "dmg",
+    "hydrodl2",
     "h5netcdf",
     "netcdf4",
     "numpy~=1.0",
     "pandas",
-    "pre-commit",
     "torch",
     "tqdm",
-    "uv",
     "xarray",
 ]
 classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
-    "License :: Free for non-commercial use",
+    "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Hydrology",
 ]
 
 [project.urls]
 Homepage = "https://mhpi.github.io/codes/frameworks/"
 Repository = "https://github.com/mhpi/dhbv2"
+Documentation = "https://github.com/mhpi/dhbv2/tree/master/docs"
+Issues = "https://github.com/mhpi/dhbv2/issues"
+Changelog = "https://github.com/mhpi/dhbv2/blob/master/docs/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [
+    "pre-commit",
     "pytest",
     "ruff",
 ]
+
+[tool.hatch]
+version.source = "vcs"
+build.hooks.vcs.version-file = "src/dhbv2/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dhbv2"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
