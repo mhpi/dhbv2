@@ -57,6 +57,14 @@ where:
 * $x_m, A_m$: Forcings and attributes for unit basin $m$.
 * $Q, S$: Model fluxes (e.g., streamflow) and states (e.g., snowpack).
 
+As this model is designed to operate at the daily timescale, forcings are aggregated at the end of every day to make a single daily prediction. This prediction is then distributed accross the proceeding 24 hours, at which point a new daily prediction is made.
+
+Since HBV is a recurrent bucket-based model, it must be "warmed up" making simulations on a period of data just prior to the target simulation window so that it's states can be allowed to saturate. Incidentally, this process also initializes internal states of the parameterization LSTM.
+
+> Note: To run a simulation in NextGen for a given time period, we require the **prior 365 days** of forcing data be included in the input to satisfy warmup described above.
+>
+> E.g., simulations starting 01/01/2009 00:00 require an input dataset timeseries starting at 01/01/2008 00:00.
+
 ### 2. δHBV 2.0 MTS (Hourly)
 
 *Introduced by Yang et al. (2025) [[2]](#publications).*
@@ -69,7 +77,7 @@ The **Multi-TimeScale (MTS)** variant adapts the architecture for hourly simulat
 
 > Note: To run a simulation in NextGen for a given time period, the **prior 358 days** of forcing data must be included in the input to satisfy warmup described above.
 >
-> E.g., simulations starting 01/01/2009 01:00 require an input dataset timeseries starting at 01/08/2008 01:00.
+> E.g., simulations starting 01/01/2009 00:00 require an input dataset timeseries starting at 01/08/2008 00:00.
 
 </br>
 
@@ -83,7 +91,7 @@ Use `dhbv2.bmi.DeltaModelBmi`.
 
 ```json
 {
-    "time_step": 86400,
+    "time_step": 3600,
     "tag": "ngen_dhbv",
     "formulation": {
         "params": {
