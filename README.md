@@ -141,31 +141,56 @@ src/dhbv2/
 └── utils.py        # Shared utilities
 ```
 
-## Publications
+## Citation
 
-1. Song, Y., Bindas, T., Shen, C., Ji, H., Knoben, W. J. M., Lonzarich, L., Clark, M. P., et al. "High-resolution national-scale water modeling is enhanced by multiscale differentiable physics-informed machine learning." Water Resources Research (2025). <https://doi.org/10.1029/2024WR038928>
+1. Song, Y., Bindas, T., Shen, C., Ji, H., Knoben, W. J. M., Lonzarich, L., et al. (2025). High-resolution national-scale water modeling is enhanced by multiscale differentiable physics-informed machine learning. Water Resources Research, 61, e2024WR038928. <https://doi.org/10.1029/2024WR038928>
 
     <details>
     <summary>BibTeX</summary>
 
     ```bibtex
-    @article{shen2023differentiable,
-    title = {High-Resolution National-Scale Water Modeling Is Enhanced by Multiscale Differentiable Physics-Informed Machine Learning},
-    author = {Song, Yalan and Bindas, Tadd and Shen, Chaopeng and Ji, Haoyu and Knoben, Wouter J. M. and Lonzarich, Leo and Clark, Martyn P. and Liu, Jiangtao and van Werkhoven, Katie and Lamont, Sam and Denno, Matthew and Pan, Ming and Yang, Yuan and Rapp, Jeremy and Kumar, Mukesh and Rahmani, Farshid and Thébault, Cyril and Adkins, Richard and Halgren, James and Patel, Trupesh and Patel, Arpita and Sawadekar, Kamlesh Arun and Lawson, Kathryn},
-    journal = {Water Resources Research},
-    volume = {61},
-    number = {4},
-    pages = {e2024WR038928},
-    year={2025},
-    doi = {https://doi.org/10.1029/2024WR038928},
-    url = {https://agupubs.onlinelibrary.wiley.com/doi/abs/10.1029/2024WR038928}
+    @article{https://doi.org/10.1029/2024WR038928,
+        author = {Song, Yalan and Bindas, Tadd and Shen, Chaopeng and Ji, Haoyu and Knoben, Wouter J. M. and Lonzarich, Leo and Clark, Martyn P. and Liu, Jiangtao and van Werkhoven, Katie and Lamont, Sam and Denno, Matthew and Pan, Ming and Yang, Yuan and Rapp, Jeremy and Kumar, Mukesh and Rahmani, Farshid and Thébault, Cyril and Adkins, Richard and Halgren, James and Patel, Trupesh and Patel, Arpita and Sawadekar, Kamlesh Arun and Lawson, Kathryn},
+        title = {High-Resolution National-Scale Water Modeling Is Enhanced by Multiscale Differentiable Physics-Informed Machine Learning},
+        journal = {Water Resources Research},
+        volume = {61},
+        number = {4},
+        pages = {e2024WR038928},
+        keywords = {differentiable modeling, physics-informed machine learning, National Water Model, routing, Muskingum Cunge, multiscale training},
+        doi = {https://doi.org/10.1029/2024WR038928},
+        year = {2025},
     }
     ```
+
     </details>
 
-    </br>
+</br>
 
-2. Yang, W., Ji, H., Lonzarich, L., Song, Y., Lawson, K., Shen, C. (2025). **[In Review]**
+2. Yang, W., Ji, H., Lonzarich, L., Song, Y., Shen, C. (2025). Diffusion-Based Probabilistic Modeling for Hourly Streamflow Prediction and Assimilation. arXiv. <https://arxiv.org/abs/2510.08488> **[Under Review]**
+
+    <details>
+    <summary>BibTeX</summary>
+
+    ```bibtex
+    @misc{yang2025diffusionbasedprobabilisticmodelinghourly,
+          title={Diffusion-Based Probabilistic Modeling for Hourly Streamflow Prediction and Assimilation},
+          author={Wencong Yang and Haoyu Ji and Leo Lonzarich and Yalan Song and Chaopeng Shen},
+          year={2025},
+          eprint={2510.08488},
+          archivePrefix={arXiv},
+          primaryClass={physics.geo-ph},
+          url={https://arxiv.org/abs/2510.08488},
+    }
+    ```
+
+    </details>
+
+</br>
+
+<table><tr>
+<td><img src="./docs/images/ciroh.png" alt="CIROH Logo"></td>
+<td>Funding for this project was provided by the National Oceanic & Atmospheric Administration (NOAA), awarded to the Cooperative Institute for Research to Operations in Hydrology (CIROH) through the NOAA Cooperative Agreement with The University of Alabama (NA22NWS4320003).</td>
+</tr></table>
 
 ## Contributing
 
