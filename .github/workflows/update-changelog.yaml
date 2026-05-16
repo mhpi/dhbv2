@@ -37,13 +37,17 @@ jobs:
             }
           }' docs/CHANGELOG.md > docs/CHANGELOG.tmp && mv docs/CHANGELOG.tmp docs/CHANGELOG.md
 
-      - name: Commit and push
+      - name: Commit and create PR
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b changelog/${{ github.event.release.tag_name }}
           git add docs/CHANGELOG.md
           git diff --cached --quiet && exit 0
-          git commit -m "docs: update CHANGELOG.md for ${RELEASE_TAG}"
-          git push
+          git commit -m "docs: update CHANGELOG.md for ${{ github.event.release.tag_name }}"
+          git push origin changelog/${{ github.event.release.tag_name }}
+          gh pr create --title "docs: update CHANGELOG.md for ${{ github.event.release.tag_name }}" \
+            --body "Automated changelog update for release ${{ github.event.release.tag_name }}." \
+            --base master --head changelog/${{ github.event.release.tag_name }}
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ github.token }}
