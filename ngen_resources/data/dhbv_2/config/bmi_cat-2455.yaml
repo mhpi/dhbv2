@@ -30,7 +30,6 @@ T_sand: 85.0
 T_silt: 11.0
 Porosity: 0.2190807723331853
 uparea: 57.389399739002336
-catchsize: 17.86364959949879
 
 # BMI configuration
 model_dir: ./data/dhbv_2/model/dhbv_2/

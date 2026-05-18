@@ -77,7 +77,6 @@ _static_input_vars = [
     ('soil_silt__volume_fraction', 'percent'),
     ('soil_active-layer__porosity', '-'),
     ('basin__area', 'km2'),
-    ('catchment__area', 'km2'),
 ]
 
 # ----------------------------------------- #
@@ -129,7 +128,6 @@ _var_name_internal_map = {
     'T_silt': 'soil_silt__volume_fraction',
     'Porosity': 'soil_active-layer__porosity',
     'uparea': 'basin__area',
-    'catchsize': 'catchment__area',
     # ----------- Outputs -----------
     'streamflow': 'land_surface_water__runoff_volume_flux',
 }
