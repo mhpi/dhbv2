@@ -312,9 +312,21 @@ class DeltaModelBmi(Bmi):
         start_time_str = self.bmi_config.get('start_time')
 
         if start_time_str is None:
-            raise ValueError("'start_time' (YYYY/MM/DD HH) is required in BMI config.")
+            raise ValueError(
+                "'start_time' (YYYY/MM/DD HH[[:MM]:SS]) is required in BMI config.",
+            )
 
-        _start_dt = datetime.datetime.strptime(start_time_str, '%Y/%m/%d %H')
+        for _fmt in ('%Y/%m/%d %H:%M:%S', '%Y/%m/%d %H:%M', '%Y/%m/%d %H'):
+            try:
+                _start_dt = datetime.datetime.strptime(start_time_str, _fmt)
+                break
+            except ValueError:
+                continue
+        else:
+            raise ValueError(
+                f"'start_time' must be in format 'YYYY/MM/DD HH[[:MM]:SS]', "
+                f"got '{start_time_str}'",
+            )
         self._start_hour = _start_dt.hour
         self._day_aligned = self._start_hour == 0
 
@@ -336,10 +348,7 @@ class DeltaModelBmi(Bmi):
                 )
             self._latitude_rad = np.deg2rad(float(lat))
 
-            self._start_date = datetime.datetime.strptime(
-                start_time_str,
-                '%Y/%m/%d %H',
-            ).replace(hour=0)
+            self._start_date = _start_dt.replace(hour=0)
 
             # If simulation starts mid-day, the first complete calendar day
             # (hours 0-23) is the day after start_date.
