@@ -39,13 +39,8 @@ verbose: false
 
 time_step: 1 day
 
-# Hour of day the simulation starts at (0-23, default 0).
-# Ensures daily aggregation aligns to calendar day boundaries (hours 0-23).
-# If non-zero, the first partial day is discarded.
-# start_hour: 0
-
 # PET calculation method: 'penman_monteith' (default) or 'hargreaves'
-# When 'hargreaves', latitude (degrees) and start_date (YYYY/MM/DD) are required.
+# When 'hargreaves', latitude (deg) and start_time (YYYY/MM/DD HH) are required.
 pet_method: 'hargreaves'
 latitude: 45.373719
-start_date: '2008/01/09'
+start_time: '2008/01/09 00'

@@ -239,7 +239,6 @@ class DeltaModelBmi(Bmi):
         # --- PET method ---
         self._pet_method = 'penman_monteith'
         self._latitude_rad = None  # Latitude in radians (for Hargreaves)
-        self._start_date = None  # Simulation start date (for Hargreaves DOY)
         self._day_count = 0  # Elapsed days since simulation start
 
         # --- Other ---
@@ -310,8 +309,15 @@ class DeltaModelBmi(Bmi):
             'time_step_size',
             self._time_step_size,
         )
-        self._start_hour = int(self.bmi_config.get('start_hour', 0))
+        start_time_str = self.bmi_config.get('start_time')
+
+        if start_time_str is None:
+            raise ValueError("'start_time' (YYYY/MM/DD HH) is required in BMI config.")
+
+        _start_dt = datetime.datetime.strptime(start_time_str, '%Y/%m/%d %H')
+        self._start_hour = _start_dt.hour
         self._day_aligned = self._start_hour == 0
+
         self._dtype = self.bmi_config.get('dtype', self._dtype)
         self._set_dtype()
         self.device = self.model_config.get('device', self.device)
@@ -320,7 +326,7 @@ class DeltaModelBmi(Bmi):
         self.req_daily_history = self.model_config['model'].get('rho', 365)
 
         # --- PET method configuration ---
-        self._pet_method = self.bmi_config.get('pet_method', 'penman_monteith')
+        self._pet_method = self.bmi_config.get('pet_method', self._pet_method)
         if self._pet_method == 'hargreaves':
             lat = self.bmi_config.get('latitude')
             if lat is None:
@@ -330,16 +336,11 @@ class DeltaModelBmi(Bmi):
                 )
             self._latitude_rad = np.deg2rad(float(lat))
 
-            start_date_str = self.bmi_config.get('start_date')
-            if start_date_str is None:
-                raise ValueError(
-                    "'start_date' (YYYY/MM/DD) is required in BMI config "
-                    "when pet_method is 'hargreaves'.",
-                )
             self._start_date = datetime.datetime.strptime(
-                start_date_str,
-                '%Y/%m/%d',
-            )
+                start_time_str,
+                '%Y/%m/%d %H',
+            ).replace(hour=0)
+
             # If simulation starts mid-day, the first complete calendar day
             # (hours 0-23) is the day after start_date.
             if self._start_hour > 0:

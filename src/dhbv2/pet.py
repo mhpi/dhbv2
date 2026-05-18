@@ -18,20 +18,20 @@ def hargreaves_pet(
     Parameters
     ----------
     tmin
-        Minimum daily temperature (degC)
+        Minimum daily temperature [degC]
     tmax
-        Maximum daily temperature (degC)
+        Maximum daily temperature [degC]
     tmean
-        Mean daily temperature (degC)
+        Mean daily temperature [degC]
     lat
-        Latitude (degrees)
+        Latitude [deg]
     day_of_year
         Day of the year (1-365/366)
 
     Returns
     -------
     ndarray
-        Potential evapotranspiration (mm/day)
+        Potential evapotranspiration [mm day-1]
     """
     SOLAR_CONSTANT = 0.0820
 
