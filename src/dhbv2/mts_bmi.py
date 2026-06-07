@@ -293,6 +293,7 @@ class MtsDeltaModelBmi(Bmi):
 
         # --- Load model input statistics for normalization ---
         self._load_norm_stats()
+        self._precompute_norm_stats()
 
         # --- Load static input variables ---
         for name in self._static_var.keys():
@@ -315,6 +316,9 @@ class MtsDeltaModelBmi(Bmi):
 
         # --- Load model ---
         self._model = self._load_model()
+
+        # --- Cache static tensors (never change after init) ---
+        self._cached_static_tensors = self._get_static_var_tensors()
 
         # --- Buffer initialization ---
         n_vars = len(
@@ -531,7 +535,7 @@ class MtsDeltaModelBmi(Bmi):
 
         # --- Format static variables as tensors ---
         c_nn_norm, rc_nn_norm, outlet_topo, areas, elev_all, ac_all = (
-            self._get_static_var_tensors()
+            self._cached_static_tensors
         )
 
         # --- Construct input tensors ---
@@ -587,8 +591,8 @@ class MtsDeltaModelBmi(Bmi):
         NDArray
             Normalized data. Shape (time, space, vars).
         """
-        mean = np.asarray(self.norm_stats['mean'][name])  # , dtype=self.np_dtype)
-        std = np.asarray(self.norm_stats['std'][name])  # , dtype=self.np_dtype)
+        mean = self.norm_stats['mean'][name]
+        std = self.norm_stats['std'][name]
 
         while mean.ndim < data.ndim:
             mean = mean[np.newaxis, ...]
@@ -876,6 +880,15 @@ class MtsDeltaModelBmi(Bmi):
                 self.norm_stats = json.load(f)
         except ValueError as e:
             raise ValueError("Normalization statistics not found.") from e
+
+    def _precompute_norm_stats(self) -> None:
+        """Convert norm stats from JSON lists to numpy arrays once at init."""
+        for split in ('mean', 'std'):
+            for key in self.norm_stats[split]:
+                self.norm_stats[split][key] = np.asarray(
+                    self.norm_stats[split][key],
+                    dtype=self.np_dtype,
+                )
 
     def _to_external_units(self, name: str, values: list[float]) -> list[float]:
         """Convert internal model units to external units."""
