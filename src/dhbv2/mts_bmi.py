@@ -591,8 +591,8 @@ class MtsDeltaModelBmi(Bmi):
         NDArray
             Normalized data. Shape (time, space, vars).
         """
-        mean = self.norm_stats['mean'][name]
-        std = self.norm_stats['std'][name]
+        mean = np.asarray(self.norm_stats['mean'][name], dtype=self.np_dtype)
+        std = np.asarray(self.norm_stats['std'][name], dtype=self.np_dtype)
 
         while mean.ndim < data.ndim:
             mean = mean[np.newaxis, ...]
