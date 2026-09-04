@@ -24,7 +24,7 @@ def hargreaves_pet(
     tmean
         Mean daily temperature [degC]
     lat
-        Latitude [deg]
+        Latitude [rad]
     day_of_year
         Day of the year (1-365/366)
 
