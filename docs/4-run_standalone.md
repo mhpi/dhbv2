@@ -31,10 +31,18 @@ Standalone runs rely on yaml **BMI config files**. These define the physics opti
 Example `bmi_cat-2453.yaml`:
 
 ```yaml
+# ... list of static attributes (aridity, meanP, etc.) ...
+
 catchment_id: 'cat-2453'
 model_dir: ./data/dhbv_2_mts/model/dhbv_2_mts/
 dtype: float32
 verbose: false
 time_step: 1 hour
-# ... list of static attributes (aridity, meanP, etc.) ...
+
+warmup:
+  cycle_days: 7
+  daily_mode: periodic
+  daily_warmup_days: 351
+  hourly_mode: periodic
+  hourly_warmup_hours: 168
 ```

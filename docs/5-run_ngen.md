@@ -63,11 +63,6 @@ docker run -it --rm localbuild/ngen:latest /bin/bash
 To cleanup old Docker images/containers:
 
 ```bash
-docker rm `docker ps --no-trunc -aq`
-docker images -q --filter "dangling=true" | xargs docker rmi
-
-# or
-
 docker system prune -f
 ```
 
@@ -229,7 +224,7 @@ docker run --rm \
     data/dhbv_2_mts/realizations/realization_multi_cat-2453.json
 ```
 
-For instructions on routing NextGen runoff simulations, see [6-routing](./6-routing.md).
+For instructions on routing NextGen runoff simulations, see [7-routing](./7-routing.md).
 
 <br/>
 

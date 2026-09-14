@@ -19,4 +19,4 @@ operation of a BMI standalone.
 
 # Docker
 
-For running ngen with Docker, copy the Dockerfile into NextGen at `./ngen/docker/`. See instructions in [docs](../docs/4-run_ngen.md) for building and running the ngen image.
+For running ngen with Docker, copy the Dockerfile into NextGen at `./ngen/docker/`. See instructions in [docs](../docs/5-run_ngen.md) for building and running the ngen image.

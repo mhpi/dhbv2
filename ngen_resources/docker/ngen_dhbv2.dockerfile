@@ -22,12 +22,18 @@ RUN dnf update -y \
     && dnf install -y \
         vim libgfortran sqlite bzip2 expat udunits2 zlib mpich hdf5 \
         netcdf netcdf-fortran netcdf-cxx netcdf-cxx4-mpich \
+        python3 \
     && dnf clean all
 
 # Install astral-uv
 ENV PATH="/root/.cargo/bin:${PATH}"
 ENV UV_INSTALL_DIR=/root/.cargo/bin
 ENV UV_COMPILE_BYTECODE=1
+
+# Force uv to use the system python3 instead of downloading its own managed
+# interpreter -- a managed interpreter lives outside .venv (e.g. ~/.local/share/uv),
+# so it wouldn't survive copying just /ngen/.venv into the final stage.
+ENV UV_PYTHON_PREFERENCE=only-system
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 RUN uv self update
 
@@ -254,8 +260,15 @@ WORKDIR /ngen
 
 COPY --from=ngen_build /ngen/.venv /ngen/.venv
 ENV VIRTUAL_ENV=/ngen/.venv
-RUN uv venv $VIRTUAL_ENV
 ENV PATH="/ngen/.venv/bin:/usr/lib64/mpich/bin:${PATH}"
+
+# The venv was created in an earlier build stage and may symlink to a python3
+# interpreter that doesn't exist in this stage's filesystem. Repoint it at this
+# stage's own system python3 (safe: same CPython 3.9 ABI, so installed packages
+# still work) instead of relying on the symlink surviving the COPY above.
+RUN rm -f $VIRTUAL_ENV/bin/python3 $VIRTUAL_ENV/bin/python \
+    && ln -s /usr/bin/python3 $VIRTUAL_ENV/bin/python3 \
+    && ln -s python3 $VIRTUAL_ENV/bin/python
 
 # Load build stages
 COPY --from=troute_build /ngen/t-route ./t-route
@@ -283,6 +296,11 @@ RUN find /ngen/extern -name "*.so" -exec dirname {} + | sort -u > /etc/ld.so.con
 RUN chmod a+x ./dmod/bin/* \
     && ln -sf /ngen/dmod/bin/ngen /usr/local/bin/ngen \
     && ln -sf /ngen/dmod/bin/partitionGenerator /usr/local/bin/partitionGenerator
+
+# Standard NGIAB realization configs reference module library_file paths as an
+# absolute /dmod/... path (not /ngen/dmod/...). Symlink so those configs work
+# unmodified against this image's /ngen/dmod layout.
+RUN ln -s /ngen/dmod /dmod
 
 RUN echo "/usr/lib64/mpich/lib" > /etc/ld.so.conf.d/00-mpich.conf && \
     echo "/ngen/dmod/shared_libs" > /etc/ld.so.conf.d/01-ngen.conf && \

@@ -33,10 +33,18 @@ uparea: 7.7805003825041545
 catchsize: 7.7805003825041545
 lengthkm: 2.147179500288239
 
-# BMI configuration
+# BMI
 model_dir: ./data/dhbv_2_mts/model/dhbv_2_mts/
 dtype: float32
-
 verbose: false
-
 time_step: 1 hour
+
+warmup:
+  # Daily->hourly handoff cadence (how long the hourly model runs per before
+  # the retrieving states from the daily model)
+  cycle_days: 14
+
+  daily_mode: periodic
+  daily_warmup_days: 351  # Inactive if daily_mode=cold
+  hourly_mode: periodic
+  hourly_warmup_hours: 336  # Inactive if hourly_mode=cold

@@ -8,19 +8,19 @@ The network can be defined in several ways, with [MERIT-hydro](https://www.reach
 
 ## T-Route
 
-[T-Route](https://github.com/NOAA-OWP/t-route) is the standard routing package shipped with [ngen](https://github.com/NOAA-OWP/ngen) and is installed by default when [building ngen with Docker](./4-run_ngen.md/#). This includes support for e.g., Muskingum-Cunge (MC) and diffusive wave routing methods.
+[T-Route](https://github.com/NOAA-OWP/t-route) is the standard routing package shipped with [ngen](https://github.com/NOAA-OWP/ngen) and is installed by default when [building ngen with Docker](./5-run_ngen.md/#). This includes support for e.g., Muskingum-Cunge (MC) and diffusive wave routing methods.
 
 For the purposes of this module, we only demonstrate usage of troute within ngen as a post-processor. If you wish to do routing standalone, please see the repo's [official documentation](https://github.com/NOAA-OWP/t-route/blob/master/readme.md).
 
 ### T-Route Setup
 
-Setup of T-Route and its dependencies is included in the Docker image build process described for ngen in [4-run_ngen](./4-run_ngen.md), so no further effort is required for this step. It should be noted that the [CIROH-UA/t-route](https://github.com/CIROH-UA/t-route) fork is used here for compatibility, but will not amount to a functional difference from source.
+Setup of T-Route and its dependencies is included in the Docker image build process described for ngen in [5-run_ngen](./5-run_ngen.md), so no further effort is required for this step. It should be noted that the [CIROH-UA/t-route](https://github.com/CIROH-UA/t-route) fork is used here for compatibility, but will not amount to a functional difference from source.
 
 If you wish to build T-Route manually, see [NOAA-OWP/t-route/readme.md](https://github.com/NOAA-OWP/t-route/blob/master/readme.md) for instructions.
 
 ### T-Route Example
 
-See [4-run_ngen](./4-run_ngen.md) for instructions on setting up ngen.
+See [5-run_ngen](./5-run_ngen.md) for instructions on setting up ngen.
 
 To run e.g. MC routing inside ngen with T-Route, an additional routing config is necessary and specified inside the realization:
 

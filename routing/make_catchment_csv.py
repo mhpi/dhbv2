@@ -3,7 +3,7 @@
 This CSV is used to build a catchment adjacency matrix necessary for routing
 simulations with the Distributed Differentiable Routing (DDR) package.
 
-See ./docs/6-routing.md for more information on routing with DDR.
+See ./docs/7-routing.md for more information on routing with DDR.
 """
 
 import os

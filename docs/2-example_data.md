@@ -65,7 +65,7 @@ The dhbv2 BMIs expects a CSV/NetCDF file with minimum attributes:
 
 ## Data Placement
 
-Example data in `./ngen_resources/` is arranged to mirror organization within NextGen. Therefore, usage with NextGen simply requires moving its contents to `ngen/data/`. See [4-run_ngen](./4-run_ngen.md) for more detail.
+Example data in `./ngen_resources/` is arranged to mirror organization within NextGen. Therefore, usage with NextGen simply requires moving its contents to `ngen/data/`. See [5-run_ngen](./5-run_ngen.md) for more detail.
 
 ```text
 dhbv2/

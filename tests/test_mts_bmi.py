@@ -64,7 +64,7 @@ class TestMtsBmiDefaults:
         """MTS should require 351 daily + 168 hourly history."""
         assert mts_bmi.req_daily_history == 351
         assert mts_bmi.req_hourly_history == 168
-        assert mts_bmi.warmup_frequency == 168
+        assert mts_bmi.warmup_interval == 168
 
     def test_variable_dicts_populated(self, mts_bmi):
         """Variable dicts should be populated with correct counts."""

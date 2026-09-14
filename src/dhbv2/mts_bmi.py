@@ -8,7 +8,7 @@ framework.
 import json
 import os
 import time
-from typing import Union
+from typing import Optional, Union
 
 import numpy as np
 import torch
@@ -132,6 +132,29 @@ _var_name_internal_map = {
 
 _var_name_external_map = {v: k for k, v in _var_name_internal_map.items()}
 
+# ----------------------------- #
+# (5) Supported warmup strategies
+# ----------------------------- #
+# Daily (low-frequency)
+_daily_modes = {
+    # Warmup over the full daily window at every warmup step (`warmup_interval`).
+    # (Legacy behavior.)
+    'periodic',
+    # Warmup over the full daily window once, then rollout the model.
+    'once',
+    # No warmup; start from zero states, and rollout to warmup on-the-fly.
+    'cold',
+}
+
+# Hourly (high-frequency)
+_hourly_modes = {
+    # load daily states, and warmup over `hourly_warmup_hours`, then simulate
+    # for `warmup_interval` hours. Repeat. (Legacy behavior.)
+    'periodic',
+    # No warmup; load daily states and simulate immediately, with no warmup
+    'cold',
+}
+
 
 def map_to_external(name: str):
     """Return the external name (exposed via BMI) for a given internal name."""
@@ -153,9 +176,47 @@ class MtsDeltaModelBmi(Bmi):
     et al., 2025).
 
     A multi-timescale (hourly) version of the δHBV2.0 BMI at
-    (dhbv2/bmi.py). MTS uses a daily-scale HBV to warmup states for an
-    hourly-scale HBV and utilizes rolling window input caching for 358-day*
-    lagged hourly runoff simulation.
+    (dhbv2/bmi.py). In its Legacy implementation*, MTS uses a daily-scale HBV to
+    warmup states for an hourly-scale HBV and utilizes rolling window input
+    caching for 358-day lagged hourly runoff simulation.
+
+    State warmup is configurable per timescale via `warmup` in the BMI config:
+
+        warmup:
+          cycle_days: 7             # how often to re-anchor the hourly model
+          daily_mode: periodic      # periodic | once | cold
+          daily_warmup_days: 351    # length of the daily spin-up window
+          hourly_mode: periodic     # periodic | cold
+          hourly_warmup_hours: 168  # length of the hourly spin-up window
+
+    The daily model always runs and always supplies the hourly model's initial
+    states, every `cycle_days`. `daily_mode` sets how it gets to them:
+    - `periodic` (default, legacy): re-spun from default states over
+      `daily_warmup_days` at every warmup.
+    - `once`: spun up over `daily_warmup_days` at the start of simulation,
+      then advanced `cycle_days` at a time from its own states.
+    - `cold`: never spun up. Starts from default states and advances
+      `cycle_days` at a time from the beginning of simulation, warming
+      itself up as the simulation proceeds.
+
+    `hourly_mode` sets what the hourly model does with those states:
+    - `periodic` (default, legacy): spun up over `hourly_warmup_hours` before
+      simulating.
+    - `cold`: simulates immediately, with no spin-up.
+
+    A mode always applies to a model's parameterization LSTM and its physics
+    states together, so both always require the same data. The lead-in before
+    the first prediction is `daily_window` + `hourly_window`; each window
+    collapses under its `cold` mode: (assuming `cycle_days=7`)
+
+    ==================  ==================  ==========
+    daily_mode          hourly_mode         lead-in
+    ==================  ==================  ==========
+    periodic / once     periodic            ~358 days
+    periodic / once     cold                ~351 days
+    cold                periodic            ~14 days
+    cold                cold                ~7 days
+    ==================  ==================  ==========
 
     Parameters
     ----------
@@ -170,17 +231,12 @@ class MtsDeltaModelBmi(Bmi):
 
     ---
 
-    *We cache 351 days of aggregated daily inputs + 7 days of hourly inputs to
-    warmup low- and high-frequency model states for the following 7 days of
-    hourly simulation. This window then rolls 7-days forward, repeating the
-    warmup steps as preparation for the next 7 days of simulation.
-    (This may be removed in the future to support direct streaming, but for now
-    we maintain a lag for representative model performance.)
-
+    NOTE*: The Legacy warmup implementation of MTS (described above) is the only
+        version tested and validated against the original δHBV2.0 MTS model.
+        Other warmup strategies are provided for operations and not guaranteed
+        to deliver benchmark performance.
     NOTE: This BMI uses both numpy arrays and pytorch tensors for internal
         computations (dtype is preserved).
-    NOTE: At least 351 days of hourly data are required before the first
-        model prediction is returned. See above.
     NOTE: BMI can only run forward inference. Training code will be released in
         the δMG package (https://github.com/mhpi/generic_deltamodel) at a later
         date.
@@ -189,7 +245,7 @@ class MtsDeltaModelBmi(Bmi):
     def __init__(self, verbose: bool = False) -> None:
         super().__init__()
         self._name = 'δHBV2.0 MTS'
-        self._version = '1.0'
+        self._version = '2.0'
         self._author_name = 'Leo Lonzarich'
 
         self.verbose = verbose
@@ -217,9 +273,11 @@ class MtsDeltaModelBmi(Bmi):
         self.eps = 1e-6
 
         # --- Caching and warmup ---
+        self.daily_mode = 'periodic'  # See `_daily_modes`.
+        self.hourly_mode = 'periodic'  # See `_hourly_modes`.
         self.req_daily_history = 351  # 351d of daily data
         self.req_hourly_history = 168  # 7d/168hr of hourly data
-        self.warmup_frequency = 168  # How often to run warmup (every 7d/168hr)
+        self.warmup_interval = 168  # How often to run warmup (every 7d/168hr)
         self._steps_since_warmup = 0
 
         # --- Cache buffers ---
@@ -240,6 +298,13 @@ class MtsDeltaModelBmi(Bmi):
             _output_vars,
             self._bmi_array([0.0]),
         )
+
+        # Flat name -> entry lookup for the BMI getters
+        self._all_vars = {
+            **self._dynamic_var,
+            **self._static_var,
+            **self._output_vars,
+        }
 
         # --- Other ---
         self.norm_stats = None
@@ -314,6 +379,9 @@ class MtsDeltaModelBmi(Bmi):
         self._set_dtype()
         self.device = self.model_config.get('device', self.device)
 
+        # --- Warmup strategy ---
+        self._parse_warmup_config()
+
         # --- Load model ---
         self._model = self._load_model()
 
@@ -325,8 +393,12 @@ class MtsDeltaModelBmi(Bmi):
             self.model_config['model']['nn']['hif_model']['forcings'],
         )  # self.get_input_item_count()
 
-        # Offset so daily and hourly buffers don't overlap.
-        self.b_offset = self.req_hourly_history // 24
+        # Offset so daily and hourly buffers don't overlap. With no hourly
+        # spin-up there is no hourly window to avoid, so the daily window runs
+        # up to the present.
+        self.b_offset = (
+            0 if self.hourly_mode == 'cold' else self.req_hourly_history // 24
+        )
 
         self._hourly_buffer = RingBuffer(
             (self.req_hourly_history + 1, 1, n_vars),
@@ -367,24 +439,10 @@ class MtsDeltaModelBmi(Bmi):
         if self._can_run_warmup():
             # --- WARMUP ---
             if self._is_warmup_trigger_step():
-                self._model.dpl_model.phy_model.use_from_cache = False
-
-                if self.verbose:
-                    log.info(f"Step {self._timestep}: Running Warmup")
-
-                # Prepare batch data (excludes current timestep)
-                warmup_dict = self._prepare_input_data(batched=True)
-
-                # Run batch forward purely for side-effect: priming self.states
-                self._do_forward(warmup_dict, batched=True)
-
-                self._is_warm = True
-                self._steps_since_warmup = 0
+                self._run_warmup()
 
             # --- STEP ---
             if self._is_warm:
-                self._model.dpl_model.phy_model.use_from_cache = True
-
                 # Standard forward pass (single current timestep)
                 # Run prediction for current hour using either fresh primed states
                 # or states carried over from t-1.
@@ -491,6 +549,7 @@ class MtsDeltaModelBmi(Bmi):
     def _prepare_input_data(
         self,
         batched: bool = False,
+        daily_steps: Optional[int] = None,
     ) -> dict[str, torch.Tensor]:
         """
         Constructs inputs for either history/cache warmup or single-step
@@ -503,6 +562,10 @@ class MtsDeltaModelBmi(Bmi):
         batched
             If True, prepares data for warmup (batch mode).
             If False, prepares data for single-step inference (sequential).
+        daily_steps
+            If given, trim the daily window to its trailing `daily_steps` days.
+            Used to advance an initialized daily model over a short window
+            instead of re-initializing over the full one.
 
         Returns
         -------
@@ -518,20 +581,17 @@ class MtsDeltaModelBmi(Bmi):
             # Daily: Just take the full available daily history (up to 351)
             # **Since daily buffer only updates every 24h, it naturally lags
             # correctly behind the current hourly window.
-            raw_daily = self._daily_buffer.get_ordered()[: -self.b_offset]
+            raw_daily = self._daily_buffer.get_ordered()
+            if self.b_offset:
+                raw_daily = raw_daily[: -self.b_offset]
+
+            if daily_steps is not None:
+                raw_daily = raw_daily[-daily_steps:]
 
         else:
             # CASE 2: SINGLE STEP INFERENCE
             # Hourly: We want ONLY the current timestep (very last entry).
             raw_hourly = self._hourly_buffer.get_last()
-
-            # Daily: For daily input during a single hourly step, we repeat
-            # the last known daily value or use zeros if architecture implies.
-            raw_daily = self._daily_buffer.get_last()
-
-        # --- Normalize ---
-        x_norm_hourly = self._normalize(raw_hourly, 'dyn_input')
-        x_norm_daily = self._normalize(raw_daily, 'dyn_input_daily')
 
         # --- Format static variables as tensors ---
         c_nn_norm, rc_nn_norm, outlet_topo, areas, elev_all, ac_all = (
@@ -539,30 +599,25 @@ class MtsDeltaModelBmi(Bmi):
         )
 
         # --- Construct input tensors ---
-        x_nn_norm_high_freq = self._bmi_tensor(x_norm_hourly)
-        x_nn_norm_low_freq = self._bmi_tensor(x_norm_daily)
-
-        x_phy_high_freq = self._bmi_tensor(raw_hourly)
-        x_phy_low_freq = self._bmi_tensor(raw_daily)
-
-        # Append static variables to dynamic inputs
-        c_nn_expanded1 = c_nn_norm.unsqueeze(0).repeat(
-            x_nn_norm_high_freq.shape[0],
-            1,
-            1,
+        x_phy_hif = self._bmi_tensor(raw_hourly)
+        x_nn_norm_hif = self._bmi_tensor(
+            self._normalize(raw_hourly, 'dyn_input'),
         )
-        xc_nn_norm_high_freq = torch.cat((x_nn_norm_high_freq, c_nn_expanded1), dim=-1)
+        xc_nn_norm_hif = self._append_static(x_nn_norm_hif, c_nn_norm)
 
-        c_nn_expanded2 = c_nn_norm.unsqueeze(0).repeat(
-            x_nn_norm_low_freq.shape[0],
-            1,
-            1,
-        )
-        xc_nn_norm_low_freq = torch.cat((x_nn_norm_low_freq, c_nn_expanded2), dim=-1)
+        # The low-frequency inputs are only read on a warmup pass
+        xc_nn_norm_lof = None
+        x_phy_lof = None
+        if batched:
+            x_phy_lof = self._bmi_tensor(raw_daily)
+            x_nn_norm_lof = self._bmi_tensor(
+                self._normalize(raw_daily, 'dyn_input_daily'),
+            )
+            xc_nn_norm_lof = self._append_static(x_nn_norm_lof, c_nn_norm)
 
         return {
-            'xc_nn_norm_high_freq': xc_nn_norm_high_freq,
-            'x_phy_high_freq': x_phy_high_freq,
+            'xc_nn_norm_hif': xc_nn_norm_hif,
+            'x_phy_hif': x_phy_hif,
             'c_nn_norm': c_nn_norm,
             'rc_nn_norm': rc_nn_norm,
             'ac_all': ac_all,
@@ -570,9 +625,31 @@ class MtsDeltaModelBmi(Bmi):
             'areas': areas,
             'outlet_topo': outlet_topo,
             # --- Add low freq items for warmup only ---
-            'xc_nn_norm_low_freq': xc_nn_norm_low_freq if batched else None,
-            'x_phy_low_freq': x_phy_low_freq if batched else None,
+            'xc_nn_norm_lof': xc_nn_norm_lof,
+            'x_phy_lof': x_phy_lof,
         }
+
+    @staticmethod
+    def _append_static(
+        dynamic: torch.Tensor,
+        static: torch.Tensor,
+    ) -> torch.Tensor:
+        """Concatenate static attributes onto every step of a dynamic input.
+
+        Parameters
+        ----------
+        dynamic
+            Dynamic inputs, shape (time, space, vars).
+        static
+            Static attributes, shape (space, attrs).
+
+        Returns
+        -------
+        torch.Tensor
+            Concatenated inputs, shape (time, space, vars + attrs).
+        """
+        expanded = static.unsqueeze(0).expand(dynamic.shape[0], -1, -1)
+        return torch.cat((dynamic, expanded), dim=-1)
 
     def _normalize(self, data: NDArray, name: str) -> NDArray:
         """Normalize model inputs with saved training data statistics.
@@ -591,14 +668,20 @@ class MtsDeltaModelBmi(Bmi):
         NDArray
             Normalized data. Shape (time, space, vars).
         """
-        mean = np.asarray(self.norm_stats['mean'][name], dtype=self.np_dtype)
-        std = np.asarray(self.norm_stats['std'][name], dtype=self.np_dtype)
+        cached = self._norm_cache.get((name, data.ndim))
+        if cached is None:
+            mean = np.asarray(self.norm_stats['mean'][name], dtype=self.np_dtype)
+            std = np.asarray(self.norm_stats['std'][name], dtype=self.np_dtype)
 
-        while mean.ndim < data.ndim:
-            mean = mean[np.newaxis, ...]
-            std = std[np.newaxis, ...]
+            while mean.ndim < data.ndim:
+                mean = mean[np.newaxis, ...]
+                std = std[np.newaxis, ...]
 
-        return (data - mean) / (std + self.eps)
+            cached = (mean, std + self.eps)
+            self._norm_cache[(name, data.ndim)] = cached
+
+        mean, std_eps = cached
+        return (data - mean) / std_eps
 
     def _get_current_forcing(self) -> NDArray:
         """
@@ -724,33 +807,203 @@ class MtsDeltaModelBmi(Bmi):
 
     # =========================================================================#
 
-    def _is_warmup_trigger_step(self) -> bool:
-        """Trigger if we are at the start of a 7-day (freq=168 hour) cycle.
+    def _parse_warmup_config(self) -> None:
+        """Read the `warmup` block of the BMI config.
 
-        We also need to ensure we actually have enough history (freq+1 hours)
-        to slice [-freq:-1].
+        Recognized keys (all optional; defaults reproduce the legacy behavior
+        of re-initializing both models every 7 days):
+
+            warmup:
+              cycle_days: 7             # daily -> hourly handoff cadence
+              daily_mode: periodic      # periodic | once | cold
+              daily_warmup_days: 351    # daily_mode periodic/once only
+              hourly_mode: periodic     # periodic | cold
+              hourly_warmup_hours: 168  # hourly_mode periodic only
+
+        `cycle_days` is always active: sets how often the daily model passes
+        its states to the hourly model, and therefore how long the hourly model
+        simulates per cycle. The two `*_warmup_*` keys are warmup lengths, so
+        each is inactive when its model's mode is 'cold' (no warmup happens).
         """
-        freq = self.warmup_frequency
-        steps_active = self._steps_since_warmup
+        cfg = self.bmi_config.get('warmup') or {}
+        if not isinstance(cfg, dict):
+            raise ValueError("BMI config key 'warmup' must be a mapping.")
 
+        daily_mode = str(cfg.get('daily_mode', self.daily_mode)).lower()
+        if daily_mode not in _daily_modes:
+            raise ValueError(
+                f"Unknown warmup.daily_mode '{daily_mode}'. "
+                f"Expected one of: {sorted(_daily_modes)}.",
+            )
+        self.daily_mode = daily_mode
+
+        hourly_mode = str(cfg.get('hourly_mode', self.hourly_mode)).lower()
+        if hourly_mode not in _hourly_modes:
+            raise ValueError(
+                f"Unknown warmup.hourly_mode '{hourly_mode}'. "
+                f"Expected one of: {sorted(_hourly_modes)}.",
+            )
+        self.hourly_mode = hourly_mode
+
+        cycle_days = int(cfg.get('cycle_days', self.warmup_interval // 24))
+        if cycle_days < 1:
+            raise ValueError(
+                f"'warmup.cycle_days' must be >= 1 (got {cycle_days}).",
+            )
+        self.warmup_interval = cycle_days * 24
+
+        if self.hourly_mode == 'cold':
+            # No hourly warmup, so no warmup window to buffer or validate: the
+            # hourly model takes the daily states and rolls out.
+            if 'hourly_warmup_hours' in cfg:
+                log.warning(
+                    "warmup.hourly_warmup_hours is inactive when hourly_mode "
+                    "is 'cold' (no hourly warmup is run). The hourly model "
+                    f"simulates for cycle_days={cycle_days} between handoffs.",
+                )
+            hourly_warmup = 1
+        else:
+            hourly_warmup = int(
+                cfg.get('hourly_warmup_hours', self.req_hourly_history),
+            )
+            if hourly_warmup < 24 or hourly_warmup % 24 != 0:
+                raise ValueError(
+                    "'warmup.hourly_warmup_hours' must be a positive multiple"
+                    f" of 24 (got {hourly_warmup}).",
+                )
+        self.req_hourly_history = hourly_warmup
+
+        if self.daily_mode == 'cold':
+            # The daily model is never warmed up, so it must not impose a
+            # warmup requirement: it only ever ingests one cycle of new forcing
+            # at a time, rolling out from its current states.
+            if 'daily_warmup_days' in cfg:
+                log.warning(
+                    "warmup.daily_warmup_days is inactive when daily_mode is "
+                    "'cold' (no daily warmup is run). The daily model advances "
+                    f"cycle_days={cycle_days} per handoff.",
+                )
+            daily_warmup = self.warmup_interval // 24
+        else:
+            daily_warmup = int(cfg.get('daily_warmup_days', self.req_daily_history))
+            if daily_warmup < 1:
+                raise ValueError(
+                    f"'warmup.daily_warmup_days' must be >= 1 (got {daily_warmup}).",
+                )
+        self.req_daily_history = daily_warmup
+
+        if self.verbose:
+            log.info(
+                f"Warmup: daily '{self.daily_mode}' ({self.req_daily_history}d)"
+                f" | hourly '{self.hourly_mode}' ({self.req_hourly_history}h)"
+                f" | cycle {self.warmup_interval}h",
+            )
+
+    def _run_warmup(self) -> None:
+        """Run a warmup pass to (re)initialize model states.
+
+        Priming the NN parameter and hidden-state caches, and the physics model
+        state caches.
+        """
+        phy_model = self._model.dpl_model.phy_model
+        first = not self._is_warm
+
+        if self.verbose:
+            log.info(
+                f"Step {self._timestep}: Warmup "
+                f"(daily '{self.daily_mode}', hourly '{self.hourly_mode}')",
+            )
+
+        # --- 1. Daily model: always runs; pick its window + starting point ---
+        phy_model.use_from_cache = False
+
+        # 'once' does initial warmup then rollout thereafter; 'cold' does rollout
+        # from the start; warmup on the fly.
+        rollout = (self.daily_mode in ('once', 'cold')) and not first
+        phy_model.lof_rollout = rollout
+
+        # On rollout, advance the daily model (physics and LSTM alike) by only
+        # the days elapsed since the last warmup.
+        daily_steps = (self.warmup_interval // 24) if rollout else None
+        lof_reset_state = not rollout
+
+        warmup_dict = self._prepare_input_data(batched=True, daily_steps=daily_steps)
+
+        # --- 2. Hourly model: spin up over its window, or start immediately ---
+        if self.hourly_mode == 'periodic':
+            self._do_forward(
+                warmup_dict,
+                batched=True,
+                lof_reset_state=lof_reset_state,
+            )
+        else:
+            self._transfer_daily_states(warmup_dict, lof_reset_state)
+
+        # Stepwise passes from here until the next warmup read their initial
+        # states from the cache.
+        phy_model.use_from_cache = True
+
+        self._is_warm = True
+        self._steps_since_warmup = 0
+
+    def _transfer_daily_states(
+        self,
+        data_dict: dict[str, torch.Tensor],
+        lof_reset_state: bool,
+    ) -> None:
+        """Advance the daily model and pass states to hourly model.
+
+        Used by `hourly_mode: cold`: the hourly model is re-anchored to the
+        daily model but simulates immediately rather than warming up over a
+        window. Only the daily half of the network runs; the hourly LSTM is
+        seeded from the transferred hidden state so it can step forward.
+        """
+        nn_model = self._model.dpl_model.nn_model
+        phy_model = self._model.dpl_model.phy_model
+
+        with torch.no_grad():
+            lstm_out, h_out, c_out, ann_out = nn_model.lstm_mlp(
+                data_dict['xc_nn_norm_lof'],
+                data_dict['c_nn_norm'],
+                reset_state=lof_reset_state,
+            )
+            lof_parameters = [lstm_out.detach(), ann_out.detach()]
+
+            # Step-wise path reads the daily parameters from this cache.
+            nn_model.lof_params_cache = [lstm_out[-1:].detach(), ann_out.detach()]
+
+            # Seed the hourly LSTM as a batched pass would have.
+            if getattr(nn_model, 'h_transfer', None) is not None:
+                nn_model.lstm_mlp2.hn = nn_model.h_transfer(h_out).detach()
+                nn_model.lstm_mlp2.cn = nn_model.c_transfer(c_out).detach()
+            else:
+                nn_model.lstm_mlp2.reset_states()
+
+            phy_model.warmup_lof(data_dict, lof_parameters)
+
+    def _is_warmup_trigger_step(self) -> bool:
+        """Trigger if we are at the start of a warmup cycle.
+
+        We also need to ensure we actually have enough history (window+1 hours)
+        to slice [-window:-1].
+        """
         # Check if buffer has history + current
-        if len(self._hourly_buffer) <= freq:
+        if len(self._hourly_buffer) <= self.req_hourly_history:
             return False
 
         # Check if at a daily boundary
         if self._timestep % 24 != 0:
             return False
 
-        # Every freq steps after:
-        return (steps_active % freq) == 0
+        # Every `warmup_interval` steps after:
+        return (self._steps_since_warmup % self.warmup_interval) == 0
 
     def _can_run_warmup(self) -> bool:
-        """
-        Check if buffers have enough history to support a warmup run.
+        """Check if buffers have enough history to support a warmup run.
 
         Requires:
-        - 351 days of daily history
-        - 168 hours of hourly history
+        - `req_daily_history` days of daily history (default 351)
+        - `req_hourly_history` hours of hourly history (default 168)
         """
         daily_ready = len(self._daily_buffer) >= self.req_daily_history + self.b_offset
         hourly_ready = len(self._hourly_buffer) >= self.req_hourly_history
@@ -766,10 +1019,13 @@ class MtsDeltaModelBmi(Bmi):
     def _set_dtype(self) -> None:
         """Set the numpy and pytorch dtype for all model variables."""
         try:
-            self.pt_dtype = eval(f"torch.{self._dtype}")
-            self.np_dtype = eval(f"np.{self._dtype}")
-        except Exception as e:
+            self.pt_dtype = getattr(torch, self._dtype)
+            self.np_dtype = getattr(np, self._dtype)
+        except AttributeError as e:
             raise ValueError(f"Could not parse dtype: {self._dtype}") from e
+
+        # Cached stats are dtype-specific.
+        self._norm_cache = {}
 
     def _bmi_array(self, arr: list[float]) -> NDArray:
         """Wrapper for standard array creation."""
@@ -795,6 +1051,7 @@ class MtsDeltaModelBmi(Bmi):
         self,
         data_dict: dict[str, torch.Tensor],
         batched: bool = True,
+        lof_reset_state: bool = True,
     ) -> dict[str, NDArray]:
         """Forward model on the pre-formatted dictionary.
 
@@ -804,6 +1061,9 @@ class MtsDeltaModelBmi(Bmi):
             Dictionary of input tensors for the model.
         batched
             Whether to run batched inference (warmup) or single-step.
+        lof_reset_state
+            If False, the low-frequency LSTM continues from its cached hidden
+            state rather than restarting. Batched passes only.
 
         Returns
         -------
@@ -811,11 +1071,37 @@ class MtsDeltaModelBmi(Bmi):
             Dictionary of model outputs.
         """
         with torch.no_grad():
-            prediction = self._model.dpl_model(data_dict, batched=batched)
+            prediction = self._model.dpl_model(
+                data_dict,
+                batched=batched,
+                lof_reset_state=lof_reset_state,
+            )
             output = {
-                'streamflow': prediction['Qs'][:, :, 0].detach().cpu().numpy(),
+                'streamflow': prediction['Qs'][:, :, 0].cpu().numpy(),
             }
         return output
+
+    @staticmethod
+    def _configure_caching(model: MtsModelHandler) -> None:
+        """Enable the state caches that stepwise inference depends on.
+
+        Stepwise inference runs one hour at a time, so both LSTMs and physics
+        models must carry their states across calls, and the MTS model must
+        sideload the low-frequency states it is handed.
+
+        Parameters
+        ----------
+        model
+            The loaded δMG model handler to configure in place.
+        """
+        nn_model = model.dpl_model.nn_model
+        phy_model = model.dpl_model.phy_model
+
+        nn_model.lstm_mlp.cache_states = True
+        nn_model.lstm_mlp2.cache_states = True
+        phy_model.lof_model.cache_states = True
+        phy_model.hif_model.cache_states = True
+        phy_model.load_from_cache = True
 
     def _load_model(self) -> MtsModelHandler:
         """Load a pre-trained model based on the configuration.
@@ -823,7 +1109,7 @@ class MtsDeltaModelBmi(Bmi):
         Returns
         -------
         MtsModelHandler
-            The loaded δMG model handler.
+            The loaded δMG modle handler.
         """
         try:
             model = MtsModelHandler(
@@ -834,16 +1120,31 @@ class MtsDeltaModelBmi(Bmi):
             model.load_model(epoch=self.model_config['test']['test_epoch'])
             model.dpl_model.eval()
 
-            # Enable state caching for stepwise inference (temporary)
-            model.dpl_model.nn_model.lstm_mlp2.cache_states = True
-            model.dpl_model.phy_model.low_freq_model.cache_states = True
-            model.dpl_model.phy_model.high_freq_model.cache_states = True
+            self._configure_caching(model)
 
-            model.dpl_model.phy_model.lof_from_cache = True
-            model.dpl_model.phy_model.load_from_cache = True
-
-            # Disable routing
-            model.dpl_model.phy_model.high_freq_model.use_distr_routing = False
+            if self.daily_mode in ('once', 'cold'):
+                if not hasattr(model.dpl_model.phy_model, 'lof_rollout'):
+                    raise RuntimeError(
+                        f"warmup.daily_mode '{self.daily_mode}' requires a"
+                        " hydrodl2 whose Hbv_2_mts supports"
+                        " `lof_rollout`. Update hydrodl2 or use"
+                        " daily_mode 'periodic'.",
+                    )
+                if not hasattr(model.dpl_model.nn_model.lstm_mlp, 'reset_states'):
+                    raise RuntimeError(
+                        f"warmup.daily_mode '{self.daily_mode}' requires a dmg"
+                        " whose LstmMlpModel supports hidden-state caching."
+                        " Update dmg or use daily_mode 'periodic'.",
+                    )
+            if self.hourly_mode == 'cold' and not hasattr(
+                model.dpl_model.phy_model,
+                'warmup_lof',
+            ):
+                raise RuntimeError(
+                    "warmup.hourly_mode 'cold' requires a hydrodl2 whose"
+                    " Hbv_2_mts supports `warmup_lof`. Update hydrodl2"
+                    " or use hourly_mode 'periodic'.",
+                )
 
             return model.to(dtype=self.pt_dtype, device=self.device)
         except Exception as e:
@@ -1082,9 +1383,7 @@ class MtsDeltaModelBmi(Bmi):
 
     def get_value_ptr(self, name: str) -> NDArray:
         """Get a reference to values of the given variable."""
-        return {**self._dynamic_var, **self._static_var, **self._output_vars}[name][
-            'value'
-        ]
+        return self._all_vars[name]['value']
 
     def get_value_at_indices(
         self,
@@ -1114,15 +1413,15 @@ class MtsDeltaModelBmi(Bmi):
 
         NOTE: ngen uses this for setting dynamic inputs.
         """
-        if not isinstance(src, np.ndarray):
-            src = np.array([src])
-        for dict in [self._dynamic_var, self._static_var, self._output_vars]:
-            if name in dict.keys():
-                dict[name]['value'] = np.expand_dims(
-                    np.array(src),
-                    axis=1,
-                )  # [time, space]
-                break
+        # NOTE: dtype is preserved here; PET is derived from these values before
+        # they reach the (possibly lower precision) buffers.
+        src = np.array(src)  # copy; callers may reuse buffer
+        if src.ndim == 0:
+            src = src[np.newaxis]
+
+        entry = self._all_vars.get(name)
+        if entry is not None:
+            entry['value'] = np.expand_dims(src, axis=1)  # [time, space]
 
     def set_value_at_indices(
         self,
@@ -1134,11 +1433,10 @@ class MtsDeltaModelBmi(Bmi):
         if not isinstance(src, list):
             src = [src]
 
-        for dict in [self._dynamic_var, self._static_var, self._output_vars]:
-            if name in dict.keys():
-                for j, i in enumerate(inds):
-                    dict[name]['value'][i] = src[j]
-                break
+        entry = self._all_vars.get(name)
+        if entry is not None:
+            for j, i in enumerate(inds):
+                entry['value'][i] = src[j]
 
     def get_grid_rank(self, grid):
         """Get number of dimensions of the computational grid.

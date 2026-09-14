@@ -5,9 +5,17 @@ operating behavior.
 We use catchment `cat-2453` (2454 and 2455 also available) on the CAMELS
 dataset as an example, with forcing timeseries available from 2008 to 2011.
 
-NOTE: The MTS model requires 1yr (358 days) of spinup data prior to simulation
-start. Therefore, this script will provide simulations starting from 2009-01-01
-using the provided data.
+NOTE: The original MTS model requires 1yr (358 days) of spinup data prior to
+simulation start. Therefore, this script will provide simulations starting from
+2009-01-01 using this mode. However, if you wish to run the model without spinup,
+set the following in the BMI config:
+
+    warmup:
+      cycle_days: 0
+      daily_mode: cold
+      daily_warmup_days: 351
+      hourly_mode: cold
+      hourly_warmup_hours: 168
 
 @leoglonz
 """
@@ -66,16 +74,23 @@ pres = forcings['PRES_surface'].values.astype(np.float64) / 1000.0  # Pa to kPa
 ugrd_10m = forcings['UGRD_10maboveground'].values.astype(np.float64)
 vgrd_10m = forcings['VGRD_10maboveground'].values.astype(np.float64)
 
+timestamps = pd.to_datetime(
+    forcings['Time'].values,
+    unit=forcings['Time'].attrs.get('units', 's'),
+    origin=pd.Timestamp(
+        forcings['Time'].attrs.get('epoch_start', '01/01/1970 00:00:00'),
+    ),
+)
+
 
 runoff_sim = []
 
 log.info(
     f" Begin BMI update loop for {t_steps} steps. "
-    f"First 1yr is model spinup with no output.",
+    f"If running with warmup, the first 1yr is model spinup with no output.",
 )
 for t in range(t_steps):
-    time = pd.to_datetime(forcings['Time'].isel({'time': t}), unit='ns')
-    # print(f"Current time: {time}, step {t}")
+    timestamp = timestamps[t]
 
     # Set forcing values
     model.set_value(
@@ -123,7 +138,7 @@ for t in range(t_steps):
     if (t > 24 * 365) and (t % 1000 == 0):
         log.info(
             f" Time {model.get_current_time()} {model.get_time_units()} "
-            f"({time}, step {t}) | Runoff {runoff_sim[-1] * 1000:.4f} mm/hr",
+            f"({timestamp}, step {t}) | Runoff {runoff_sim[-1] * 1000:.4f} mm/hr",
         )
 
 
