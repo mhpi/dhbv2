@@ -44,8 +44,8 @@ pet_method: penman_monteith
 latitude: 45.38943493686819
 
 warmup:
-  # Daily->hourly handoff cadence (how long the hourly model runs per before
-  # the retrieving states from the daily model)
+  # Daily->hourly handoff cadence (how long the hourly model runs before
+  # retrieving states from the daily model)
   cycle_days: 14
 
   daily_mode: periodic

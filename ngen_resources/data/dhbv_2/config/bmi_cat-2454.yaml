@@ -34,13 +34,12 @@ uparea: 30.46544959500381
 # BMI configuration
 model_dir: ./data/dhbv_2/model/dhbv_2/
 dtype: float32
-
 verbose: false
 
-time_step: 1 day
+# Simulation start (YYYY/MM/DD HH); aligns hourly forcing to calendar days.
+start_time: '2008/01/09 00'
 
 # PET calculation method: 'penman_monteith' (default) or 'hargreaves'
 # When 'hargreaves', latitude (deg) and start_time (YYYY/MM/DD HH) are required.
 pet_method: 'hargreaves'
 latitude: 45.399617
-start_time: '2008/01/09 00'
