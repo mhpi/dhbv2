@@ -1117,7 +1117,6 @@ class MtsDeltaModelBmi(Bmi):
                 device=self.device,
                 verbose=self.verbose,
             )
-            model.load_model(epoch=self.model_config['test']['test_epoch'])
             model.dpl_model.eval()
 
             self._configure_caching(model)
