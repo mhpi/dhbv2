@@ -65,13 +65,21 @@ t_steps = len(forcings['time'])
 
 # Maintain strict typing of forcing arrays
 precip = forcings['precip_rate'].values.astype(np.float64) * 3600.0  # mm/s to mm/hr
-temp = forcings['TMP_2maboveground'].values.astype(np.float64)  # degC
+temp = forcings['TMP_2maboveground'].values.astype(np.float64) - 273.15  # K to degC
 spfh = forcings['SPFH_2maboveground'].values.astype(np.float64)
 dlwrf = forcings['DLWRF_surface'].values.astype(np.float64)
 dswrf = forcings['DSWRF_surface'].values.astype(np.float64)
-pres = forcings['PRES_surface'].values.astype(np.float64) / 1000.0  # Pa to kPa
+pres = forcings['PRES_surface'].values.astype(np.float64)  # Pa
 ugrd_10m = forcings['UGRD_10maboveground'].values.astype(np.float64)
 vgrd_10m = forcings['VGRD_10maboveground'].values.astype(np.float64)
+
+timestamps = pd.to_datetime(
+    forcings['Time'].values,
+    unit=forcings['Time'].attrs.get('units', 's'),
+    origin=pd.Timestamp(
+        forcings['Time'].attrs.get('epoch_start', '01/01/1970 00:00:00'),
+    ),
+)
 
 
 runoff_sim = []
@@ -84,7 +92,7 @@ log.info(
     f"First 1yr ({WARMUP_HOURS} hours) is model spinup with no output.",
 )
 for t in range(t_steps):
-    time = pd.to_datetime(forcings['Time'].isel({'time': t}), unit='ns')
+    timestamp = timestamps[t]
 
     # Set forcing values (hourly inputs, same as MTS BMI)
     model.set_value(
@@ -132,7 +140,7 @@ for t in range(t_steps):
     if (t > WARMUP_HOURS) and (t % 1000 == 0):
         log.info(
             f" Time {model.get_current_time()} {model.get_time_units()} "
-            f"({time}, step {t}) | Runoff {runoff_sim[-1] * 1000:.4f} mm/hr",
+            f"({timestamp}, step {t}) | Runoff {runoff_sim[-1] * 1000:.4f} mm/hr",
         )
 
 
