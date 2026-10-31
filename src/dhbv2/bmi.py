@@ -585,7 +585,7 @@ class DeltaModelBmi(Bmi):
         x_norm = self._normalize(raw_daily, var_x_list)
 
         # Get static variables
-        c_nn_norm, areas, elev_all, ac_all = self._get_static_var_tensors()
+        c_nn_norm, elev_all, ac_all = self._get_static_var_tensors()
 
         # Convert to tensors
         x_nn_norm = self._bmi_tensor(x_norm)
@@ -601,7 +601,6 @@ class DeltaModelBmi(Bmi):
             'c_nn_norm': c_nn_norm,
             'ac_all': ac_all,
             'elev_all': elev_all,
-            'areas': areas,
         }
 
     def _normalize(self, data: NDArray, names: list[str]) -> NDArray:
@@ -675,7 +674,6 @@ class DeltaModelBmi(Bmi):
         tuple
             Tensors for:
             - c_nn_norm: Normalized catchment attributes for NN.
-            - areas: Catchment areas.
             - elev_all: Catchment elevations.
             - ac_all: Catchment upstream areas.
         """
@@ -713,18 +711,12 @@ class DeltaModelBmi(Bmi):
         ac_all = self._bmi_tensor(
             self._static_var[map_to_external('uparea')]['value'],
         )
-        areas = self._bmi_tensor(
-            self._static_var[map_to_external('catchsize')]['value'],
-        )
-
         if elev_all.ndim < 2:
             elev_all = elev_all.unsqueeze(0)
         if ac_all.ndim < 2:
             ac_all = ac_all.unsqueeze(0)
-        if areas.ndim < 2:
-            areas = areas.unsqueeze(0)
 
-        return (c_nn_norm, areas, elev_all, ac_all)
+        return (c_nn_norm, elev_all, ac_all)
 
     # =========================================================================#
 
