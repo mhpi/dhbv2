@@ -147,6 +147,14 @@ class TestDailyBmiInfo:
         nbytes = daily_bmi.get_var_nbytes(name)
         assert nbytes > 0
 
+    def test_single_unit_output_stays_1d(self, daily_bmi):
+        """A single unit's [1, 1] output should stay 1-D for ngen size queries."""
+        names = daily_bmi.get_output_var_names()
+        daily_bmi._format_outputs({map_to_internal(n): np.ones((1, 1)) for n in names})
+        for name in names:
+            assert daily_bmi.get_value_ptr(name).shape == (1,)
+            assert daily_bmi.get_var_nbytes(name) == 8
+
     def test_get_var_grid(self, daily_bmi):
         """Grid ID should be 0 for all variables."""
         for name in daily_bmi.get_input_var_names():

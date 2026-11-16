@@ -2,7 +2,7 @@
 
 Coverage:
 - Constructor defaults and initial state
-- BMI info methods (component name, var names, counts)
+- BMI info methods (component name, var names, counts, output shape)
 - Variable name mapping (MTS-specific, includes 'lengthkm')
 - Unit conversion (mm/h -> m/h)
 - Cache management (_update_caches, buffer filling)
@@ -108,6 +108,14 @@ class TestMtsBmiInfo:
     def test_output_var_names_match_daily(self, daily_bmi, mts_bmi):
         """Both BMI variants should share the same output variable names."""
         assert daily_bmi.get_output_var_names() == mts_bmi.get_output_var_names()
+
+    def test_single_unit_output_stays_1d(self, mts_bmi):
+        """A single unit's [1, 1] output should stay 1-D for ngen size queries."""
+        names = mts_bmi.get_output_var_names()
+        mts_bmi._format_outputs({map_to_internal(n): np.ones((1, 1)) for n in names})
+        for name in names:
+            assert mts_bmi.get_value_ptr(name).shape == (1,)
+            assert mts_bmi.get_var_nbytes(name) == 8
 
 
 # ---------------------------------------------------------------------------- #

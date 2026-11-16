@@ -119,12 +119,27 @@ So with defaults, a simulation starting `2009-01-01 00:00` needs a forcing times
 
 An invalid `daily_mode`, `hourly_mode`, or `cycle_days < 1` raises at `initialize()` rather than failing quietly. The `*_warmup_*` keys are validated only when their mode is not `cold`, since a `cold` mode neither reads nor needs them.
 
-### (5) Example
+### (5) MTS-Only Keys: serialization
+
+The MTS BMI supports NextGen checkpoint/restore (the ngen BMI Serialization Protocol; see noaa-ngen doc/BMI_SERIALIZATION_PROTOCOL.md). Saving and restoring are switched on in the realization's 'serialization' block, not here; see the save/resume realization pair in [5-run_ngen](./5-run_ngen.md). A checkpoint holds the step counter, both LSTMs' hidden and cell states, the cached daily parameters, both HBV models' states, the current outputs, and (optionally) the forcing buffers. A restore only succeeds into a BMI with the same weights, dtype, and warmup settings, and the same 'catchment_id' if both configs set one.
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| forcing_history | bool | true | Save the hourly and daily forcing buffers in each checkpoint. |
+
+The forcing buffers are ~80% of a checkpoint (7.6 KB vs 1.5 KB per catchment with 351-day/336-hour windows), and only later warmups read them.
+
+* true (default): restoring and continuing reproduces an uninterrupted run exactly.
+* false: the restore keeps every model state and parameter but starts with empty buffers. The warmup cycle restarts at the next day boundary, the model keeps stepping while the buffers refill, and each warmup waits until the buffers cover its window (~28 days at the settings above). Under daily_mode 'periodic', the daily model is advanced from its restored states until the 351-day window has refilled. Output matches an uninterrupted run until that run's next warmup, then departs from it.
+
+The daily BMI supports the same protocol with no config keys (data/dhbv_2/realizations/ has its own save/resume pair; see [5-run_ngen](./5-run_ngen.md)). After its one warmup, each day reads only the day it appended, so a checkpoint holds just the counters, the partial day of hourly forcing, the LSTM and HBV states, and the current prediction (~1.3 KB per catchment); one taken before the warmup also holds the daily forcing buffer (~4.2 KB). Static parameters come from the MLP on the catchment attributes, so they need no saving. Restoring and continuing reproduces an uninterrupted run exactly. Besides the weights, dtype, and 'catchment_id', a restore requires the same 'start_time', 'pet_method', and warmup length ('rho') as the saving run, since the hour of day and day of year are counted from 'start_time'.
+
+### (6) Example
 
 ```yaml
 # ./ngen_resources/data/dhbv_2_mts/config/bmi_cat-2453.yaml
 
-catchment_id: 'cat-2453'      # bookkeeping only
+catchment_id: 'cat-2453'  # bookkeeping; also checked on checkpoint restore
 
 # Catchment attributes
 aridity: 0.6210572673615424
@@ -148,6 +163,9 @@ warmup:
   daily_warmup_days: 351
   hourly_mode: periodic
   hourly_warmup_hours: 168
+
+serialization:
+  forcing_history: true
 ```
 
 </br>
