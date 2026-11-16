@@ -52,3 +52,9 @@ warmup:
   daily_warmup_days: 351  # Inactive if daily_mode=cold
   hourly_mode: periodic
   hourly_warmup_hours: 336  # Inactive if hourly_mode=cold
+
+serialization:
+  # Save the hourly and daily forcing buffers in ngen checkpoints. Setting
+  # false shrinks a checkpoint ~5x (7.6 KB -> 1.5 KB per catchment), but a
+  # restore then restarts the warmup cycle and departs from an uninterrupted run.
+  forcing_history: true
