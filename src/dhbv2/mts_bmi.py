@@ -5,10 +5,13 @@ framework.
 @Leo Lonzarich
 """
 
+import hashlib
 import json
 import os
+import struct
 import time
-from typing import Optional, Union
+import zlib
+from typing import Any, Optional, Union
 
 import numpy as np
 import torch
@@ -156,6 +159,33 @@ _hourly_modes = {
 }
 
 
+# --------------------------------- #
+# (6) ngen BMI Serialization Protocol
+# --------------------------------- #
+# See NOAA-OWP/ngen/doc/BMI_SERIALIZATION_PROTOCOL.md
+# Resolved by name and never listed in input/output var names.
+_SERIAL_CREATE = 'ngen::serialization_create'
+_SERIAL_FREE = 'ngen::serialization_free'
+_SERIAL_SIZE = 'ngen::serialization_size'
+_SERIAL_STATE = 'ngen::serialization_state'
+
+_serial_var_units = {
+    _SERIAL_CREATE: 'ngen::trigger',
+    _SERIAL_FREE: 'ngen::trigger',
+    _SERIAL_SIZE: 'bytes',
+    _SERIAL_STATE: 'ngen::opaque',
+}
+
+_SERIAL_MAGIC = b'DHBV2MTS'
+_SERIAL_VERSION = 1
+_SERIAL_HEADER = struct.Struct('<8sII')
+
+_SERIAL_DTYPE_KINDS = 'fiub'
+
+# Avoid something dangerous
+_SERIAL_MAX_BYTES = 64 * 1024**2
+
+
 def map_to_external(name: str):
     """Return the external name (exposed via BMI) for a given internal name."""
     return _var_name_internal_map[name]
@@ -171,8 +201,8 @@ def map_to_internal(name: str):
 # -------------------------------------------------- #
 class MtsDeltaModelBmi(Bmi):
     """
-    (δHBV2.0 MTS BMI) NextGen-compatible, differentiable, physics-informed ML
-    rainfall-runoff model for hydrologic forecasting (Yang et al., 2025; Song
+    (δHBV2.0/2.1 MTS BMI) NextGen-compatible, differentiable, physics-informed ML
+    rainfall-runoff model for hydrologic forecasting (Yang et al., 2026; Song
     et al., 2025).
 
     A multi-timescale (hourly) version of the δHBV2.0 BMI at
@@ -217,6 +247,35 @@ class MtsDeltaModelBmi(Bmi):
     cold                periodic            ~14 days
     cold                cold                ~7 days
     ==================  ==================  ==========
+
+    NOTE: This supports NextGen checkpoint/restore (ngen BMI Serialization
+    Protocol). A checkpoint holds everything the next step depends on: step
+    counter + warmup clock, hourly + daily forcing buffers, NN hidden and
+    cell states, cached daily parameters, HBV model states, and current outputs.
+
+    A checkpoint only restores into a BMI with the same weights, dtype, and
+    warmup settings (and catchment, if both configs set 'catchment_id');
+    anything else will fail the restore.
+
+    The forcing buffers make up about 80% of checkpoint size and are only used
+    for later warmups. Set
+
+        serialization:
+          forcing_history: false
+
+    to exclude them (about 1.5 KB vs. 7.6 KB per catchment with default
+    settings). Restoring from such a checkpoint will restart the model with
+    empty buffers and restart warmup per the warmup settings. Note,
+    - The step counter (model clock) is restored; the warmup cycle restarts at
+      the next day boundary.
+    - The model keeps stepping on its restored states while the buffers
+      refill. Each warmup waits until the buffers cover its window.
+    - Under daily_mode 'periodic', the daily model is advanced from its
+      restored states (as under 'once') until the daily window has refilled,
+      then re-init as usual.
+    - The forcing between the last warmup before the save and the first
+      daily window after the restore never reaches the daily model.
+
 
     Parameters
     ----------
@@ -273,8 +332,8 @@ class MtsDeltaModelBmi(Bmi):
         self.eps = 1e-6
 
         # --- Caching and warmup ---
-        self.daily_mode = 'periodic'  # See `_daily_modes`.
-        self.hourly_mode = 'periodic'  # See `_hourly_modes`.
+        self.daily_mode = 'periodic'  # -> _daily_modes
+        self.hourly_mode = 'periodic'  # -> _hourly_modes
         self.req_daily_history = 351  # 351d of daily data
         self.req_hourly_history = 168  # 7d/168hr of hourly data
         self.warmup_interval = 168  # How often to run warmup (every 7d/168hr)
@@ -305,6 +364,16 @@ class MtsDeltaModelBmi(Bmi):
             **self._static_var,
             **self._output_vars,
         }
+
+        # ngen serialization protocol
+        self._serial_vars = {
+            _SERIAL_CREATE: np.zeros(1, dtype=np.int32),
+            _SERIAL_FREE: np.zeros(1, dtype=np.int32),
+            _SERIAL_SIZE: np.zeros(1, dtype=np.int64),
+            _SERIAL_STATE: np.zeros(0, dtype=np.uint8),
+        }
+        self._weights_sha256 = None
+        self.serial_forcing_history = True  # -> _parse_serialization_config
 
         # --- Other ---
         self.norm_stats = None
@@ -379,8 +448,9 @@ class MtsDeltaModelBmi(Bmi):
         self._set_dtype()
         self.device = self.model_config.get('device', self.device)
 
-        # --- Warmup strategy ---
+        # --- Warmup strategy and checkpoint contents ---
         self._parse_warmup_config()
+        self._parse_serialization_config()
 
         # --- Load model ---
         self._model = self._load_model()
@@ -436,7 +506,9 @@ class MtsDeltaModelBmi(Bmi):
 
         # 2. Check if we have enough history to run a prediction.
         #    (We need at least 351 days + 168 hours of data to do first warmup).
-        if self._can_run_warmup():
+        #    A warm model keeps stepping while its buffers refill after a
+        #    restore without forcing history.
+        if self._is_warm or self._can_run_warmup():
             # --- WARMUP ---
             if self._is_warmup_trigger_step():
                 self._run_warmup()
@@ -899,6 +971,37 @@ class MtsDeltaModelBmi(Bmi):
                 f" | cycle {self.warmup_interval}h",
             )
 
+    def _parse_serialization_config(self) -> None:
+        """Read the 'serialization' block of the BMI config.
+
+        Recognized keys (all optional):
+
+            serialization:
+              forcing_history: true  # save the forcing buffers in checkpoints
+
+        With forcing_history false, a checkpoint leaves out the hourly and
+        daily forcing buffers (about 80% of its size). A restore from it keeps
+        the model states but starts with empty buffers, so the warmup cycle
+        restarts at the next day boundary and later warmups differ from an
+        uninterrupted run.
+        """
+        cfg = self.bmi_config.get('serialization') or {}
+        if not isinstance(cfg, dict):
+            raise ValueError("BMI config key 'serialization' must be a mapping.")
+        unknown = set(cfg) - {'forcing_history'}
+        if unknown:
+            raise ValueError(
+                f"Unknown BMI config 'serialization' keys {sorted(unknown)}. "
+                "Options: ['forcing_history'].",
+            )
+        forcing_history = cfg.get('forcing_history', True)
+        if not isinstance(forcing_history, bool):
+            raise ValueError(
+                "'serialization.forcing_history' must be true or false "
+                f"(got {forcing_history!r}).",
+            )
+        self.serial_forcing_history = forcing_history
+
     def _run_warmup(self) -> None:
         """Run a warmup pass to (re)initialize model states.
 
@@ -906,7 +1009,6 @@ class MtsDeltaModelBmi(Bmi):
         state caches.
         """
         phy_model = self._model.dpl_model.phy_model
-        first = not self._is_warm
 
         if self.verbose:
             log.info(
@@ -917,9 +1019,7 @@ class MtsDeltaModelBmi(Bmi):
         # --- 1. Daily model: always runs; pick its window + starting point ---
         phy_model.use_from_cache = False
 
-        # 'once' does initial warmup then rollout thereafter; 'cold' does rollout
-        # from the start; warmup on the fly.
-        rollout = (self.daily_mode in ('once', 'cold')) and not first
+        rollout = self._daily_rollout()
         phy_model.lof_rollout = rollout
 
         # On rollout, advance the daily model (physics and LSTM alike) by only
@@ -996,7 +1096,37 @@ class MtsDeltaModelBmi(Bmi):
             return False
 
         # Every `warmup_interval` steps after:
-        return (self._steps_since_warmup % self.warmup_interval) == 0
+        if (self._steps_since_warmup % self.warmup_interval) != 0:
+            return False
+
+        # Check the daily buffer covers this warmup's window. It only falls
+        # short after a restore without forcing history; the warmup is then
+        # deferred to the next cycle.
+        daily_days = (
+            self.warmup_interval // 24
+            if self._daily_rollout()
+            else self.req_daily_history
+        )
+        return len(self._daily_buffer) >= daily_days + self.b_offset
+
+    def _daily_rollout(self) -> bool:
+        """Whether the next warmup advances the daily model from its states.
+
+        Otherwise the daily model is re-spun from default states over its full
+        window.
+
+        Returns
+        -------
+        bool
+            True for every warmup after the first under daily_mode 'once' or
+            'cold', and under 'periodic' while the daily window is refilling
+            after a restore without forcing history.
+        """
+        if not self._is_warm:
+            return False
+        if self.daily_mode in ('once', 'cold'):
+            return True
+        return len(self._daily_buffer) < self.req_daily_history + self.b_offset
 
     def _can_run_warmup(self) -> bool:
         """Check if buffers have enough history to support a warmup run.
@@ -1009,6 +1139,483 @@ class MtsDeltaModelBmi(Bmi):
         hourly_ready = len(self._hourly_buffer) >= self.req_hourly_history
 
         return daily_ready and hourly_ready
+
+    # =========================================================================#
+
+    # State Serialization (ngen BMI Serialization Protocol)
+
+    # =========================================================================#
+
+    # Scalar and array BMI attributes saved with the model state. Together with
+    # '_SERIALIZED_BUFFERS', the output values, and the model's runtime state,
+    # this is the single list that save, restore, and validation all read.
+    _SERIALIZED_FIELDS = (
+        '_timestep',
+        '_steps_since_warmup',
+        '_is_warm',
+        '_day_accumulator',
+        '_day_accumulator_ptr',
+    )
+    _SERIALIZED_BUFFERS = (
+        '_hourly_buffer',
+        '_daily_buffer',
+    )
+
+    def _set_serial_value(self, name: str, src: Any) -> None:
+        """Handle 'set_value' on a reserved serialization variable.
+
+        Parameters
+        ----------
+        name
+            Reserved variable name.
+        src
+            Value passed by the caller. Ignored for the two triggers.
+        """
+        if name == _SERIAL_CREATE:
+            self._create_serialization()
+        elif name == _SERIAL_FREE:
+            self._free_serialization()
+        elif name == _SERIAL_SIZE:
+            self._serial_vars[_SERIAL_SIZE][0] = int(np.asarray(src).ravel()[0])
+        else:
+            if isinstance(src, (bytes, bytearray)):
+                blob = np.frombuffer(src, dtype=np.uint8)
+            else:
+                blob = np.asarray(src, dtype=np.uint8).ravel()
+            expected = int(self._serial_vars[_SERIAL_SIZE][0])
+            if expected and blob.size != expected:
+                raise ValueError(
+                    f"Serialized state has {blob.size} bytes, but "
+                    f"'{_SERIAL_SIZE}' announced {expected}.",
+                )
+            self._restore_state(blob.tobytes())
+
+    def _create_serialization(self) -> None:
+        """Capture the current state into the serialization buffer.
+
+        Does not change the model's computed state.
+        """
+        blob = self._capture_state()
+        self._serial_vars[_SERIAL_STATE] = np.frombuffer(blob, dtype=np.uint8).copy()
+        self._serial_vars[_SERIAL_SIZE][0] = len(blob)
+
+    def _free_serialization(self) -> None:
+        """Release the serialization buffer. Safe to call at any time."""
+        self._serial_vars[_SERIAL_STATE] = np.zeros(0, dtype=np.uint8)
+        self._serial_vars[_SERIAL_SIZE][0] = 0
+
+    def _require_runtime_state(self) -> None:
+        """Check that the BMI and installed dmg support serialization."""
+        if not self._initialized:
+            raise RuntimeError(
+                "BMI must be initialized before its state can be saved or restored.",
+            )
+        if not hasattr(self._model.dpl_model, 'get_runtime_state'):
+            raise RuntimeError(
+                "State serialization requires a dmg whose MtsDplModel supports "
+                "'get_runtime_state'. Update dmg and hydrodl2.",
+            )
+
+    def _serialization_metadata(self) -> dict[str, Any]:
+        """Identify the model and settings a payload is only valid for.
+
+        Returns
+        -------
+        dict
+            Model name and version, SHA-256 of the loaded weights, dtype,
+            unit count, catchment ID, and warmup settings.
+        """
+        if self._weights_sha256 is None:
+            digest = hashlib.sha256()
+            for key, value in self._model.dpl_model.state_dict().items():
+                digest.update(key.encode())
+                digest.update(value.detach().cpu().contiguous().numpy().tobytes())
+            self._weights_sha256 = digest.hexdigest()
+
+        return {
+            'model': self._name,
+            'version': self._version,
+            'weights_sha256': self._weights_sha256,
+            'dtype': self._dtype,
+            'n_units': self.n_units,
+            'catchment_id': self.bmi_config.get('catchment_id'),
+            'warmup': {
+                'daily_mode': self.daily_mode,
+                'hourly_mode': self.hourly_mode,
+                'req_daily_history': self.req_daily_history,
+                'req_hourly_history': self.req_hourly_history,
+                'warmup_interval': self.warmup_interval,
+            },
+        }
+
+    @staticmethod
+    def _pack_arrays(value: Any, arrays: list[np.ndarray]) -> Any:
+        """Swap every array in a nested container for an index into 'arrays'.
+
+        Parameters
+        ----------
+        value
+            Nested dicts, lists, and tuples of arrays, tensors, and scalars.
+        arrays
+            Receives the arrays in the order they are indexed.
+
+        Returns
+        -------
+        Any
+            The same structure, JSON-serializable, with each array or tensor
+            replaced by {'#': i}.
+        """
+        if isinstance(value, torch.Tensor):
+            value = value.detach().cpu().contiguous().numpy()
+        if isinstance(value, np.ndarray):
+            arrays.append(np.ascontiguousarray(value))
+            return {'#': len(arrays) - 1}
+        if isinstance(value, dict):
+            return {
+                k: MtsDeltaModelBmi._pack_arrays(v, arrays) for k, v in value.items()
+            }
+        if isinstance(value, (list, tuple)):
+            return [MtsDeltaModelBmi._pack_arrays(v, arrays) for v in value]
+        if isinstance(value, (bool, np.bool_)):
+            return bool(value)
+        if isinstance(value, (int, np.integer)):
+            return int(value)
+        if value is None or isinstance(value, str):
+            return value
+        raise TypeError(f"Cannot serialize a value of type {type(value).__name__}.")
+
+    @staticmethod
+    def _unpack_arrays(value: Any, arrays: list[torch.Tensor]) -> Any:
+        """Invert '_pack_arrays', swapping each {'#': i} for 'arrays[i]'."""
+        if isinstance(value, dict):
+            if set(value) == {'#'}:
+                index = value['#']
+                if not isinstance(index, int) or not 0 <= index < len(arrays):
+                    raise ValueError(f"Serialized array index {index!r} is invalid.")
+                return arrays[index]
+            return {
+                k: MtsDeltaModelBmi._unpack_arrays(v, arrays) for k, v in value.items()
+            }
+        if isinstance(value, list):
+            return [MtsDeltaModelBmi._unpack_arrays(v, arrays) for v in value]
+        return value
+
+    def _capture_state(self, forcing_history: Optional[bool] = None) -> bytes:
+        """Encode the full BMI and model state as bytes.
+
+        Parameters
+        ----------
+        forcing_history
+            Whether to include the hourly and daily forcing buffers. Defaults
+            to the config's 'serialization.forcing_history'.
+
+        Returns
+        -------
+        bytes
+            Header, then the compressed JSON index and raw array bytes (see
+            '_SERIAL_HEADER') for the metadata, BMI fields, ring buffers,
+            outputs, and model runtime state.
+        """
+        self._require_runtime_state()
+        if forcing_history is None:
+            forcing_history = self.serial_forcing_history
+
+        buffers = {}
+        if forcing_history:
+            for field in self._SERIALIZED_BUFFERS:
+                ring = getattr(self, field)
+                buffers[field] = {
+                    'buffer': ring.buffer,
+                    'ptr': ring.ptr,
+                    'is_full': ring.is_full,
+                }
+
+        state = {
+            'bmi': {field: getattr(self, field) for field in self._SERIALIZED_FIELDS},
+            'buffers': buffers,
+            'outputs': {
+                name: np.array(entry['value'], dtype=self.np_dtype)
+                for name, entry in self._output_vars.items()
+            },
+            'model': self._model.dpl_model.get_runtime_state(),
+        }
+
+        arrays = []
+        index = {
+            'meta': self._serialization_metadata(),
+            'forcing_history': forcing_history,
+            'state': self._pack_arrays(state, arrays),
+        }
+        index['arrays'] = [[a.dtype.str, list(a.shape)] for a in arrays]
+        index_bytes = json.dumps(index, separators=(',', ':')).encode('utf-8')
+
+        header = _SERIAL_HEADER.pack(_SERIAL_MAGIC, _SERIAL_VERSION, len(index_bytes))
+        body = b''.join([index_bytes, *(a.tobytes() for a in arrays)])
+        return header + zlib.compress(body)
+
+    def _decode_arrays(
+        self,
+        table: Any,
+        blob: bytes,
+        offset: int,
+    ) -> list[torch.Tensor]:
+        """Read the raw arrays that follow the JSON index.
+
+        Parameters
+        ----------
+        table
+            The index's [dtype, shape] entries, in storage order.
+        blob
+            The decompressed payload body.
+        offset
+            Byte offset of the first array.
+
+        Returns
+        -------
+        list[torch.Tensor]
+            One tensor per table entry.
+        """
+        if not isinstance(table, list):
+            raise ValueError("Serialized array table must be a list.")
+
+        arrays = []
+        for entry in table:
+            try:
+                dtype_str, shape = entry
+                dtype = np.dtype(dtype_str)
+                shape = tuple(int(n) for n in shape)
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"Invalid serialized array entry {entry!r}.") from e
+            if dtype.kind not in _SERIAL_DTYPE_KINDS or not dtype.isnative:
+                raise ValueError(f"Unsupported serialized array dtype '{dtype_str}'.")
+            if any(n < 0 for n in shape):
+                raise ValueError(f"Invalid serialized array shape {shape}.")
+
+            count = int(np.prod(shape, dtype=np.int64))
+            end = offset + count * dtype.itemsize
+            if end > len(blob):
+                raise ValueError(
+                    f"Serialized state is truncated: an array needs bytes up to "
+                    f"{end}, but the payload has {len(blob)}.",
+                )
+            values = np.frombuffer(blob, dtype=dtype, count=count, offset=offset)
+            arrays.append(torch.from_numpy(values.reshape(shape).copy()))
+            offset = end
+
+        if offset != len(blob):
+            raise ValueError(
+                f"Serialized state has {len(blob) - offset} unexpected trailing bytes.",
+            )
+        return arrays
+
+    def _decode_state(self, blob: bytes) -> dict[str, Any]:
+        """Decode and validate a payload without touching model state.
+
+        Parameters
+        ----------
+        blob
+            Bytes produced by '_capture_state'.
+
+        Returns
+        -------
+        dict
+            The decoded payload ('meta', 'forcing_history', 'bmi', 'buffers',
+            'outputs', 'model'), checked against this BMI's model, settings,
+            and array shapes.
+        """
+        if len(blob) < _SERIAL_HEADER.size:
+            raise ValueError(
+                f"Serialized state is {len(blob)} bytes, shorter than its "
+                f"{_SERIAL_HEADER.size}-byte header.",
+            )
+        magic, version, index_size = _SERIAL_HEADER.unpack_from(blob)
+        if magic != _SERIAL_MAGIC:
+            raise ValueError(
+                f"Serialized state has magic {magic!r}, expected {_SERIAL_MAGIC!r}. "
+                "It was not written by this model.",
+            )
+        if version != _SERIAL_VERSION:
+            raise ValueError(
+                f"Unsupported serialized state format version {version} "
+                f"(expected {_SERIAL_VERSION}).",
+            )
+
+        inflater = zlib.decompressobj()
+        try:
+            body = inflater.decompress(blob[_SERIAL_HEADER.size :], _SERIAL_MAX_BYTES)
+        except zlib.error as e:
+            raise ValueError(f"Failed decompressing serialized state: {e}") from e
+        if inflater.unconsumed_tail:
+            raise ValueError(
+                f"Serialized state exceeds {_SERIAL_MAX_BYTES} bytes decompressed.",
+            )
+        if not inflater.eof or inflater.unused_data:
+            raise ValueError("Serialized state is truncated or has trailing bytes.")
+
+        if index_size > len(body):
+            raise ValueError(
+                f"Serialized state is truncated: its index needs {index_size} "
+                f"bytes, but the body has {len(body)}.",
+            )
+        try:
+            index = json.loads(body[:index_size].decode('utf-8'))
+        except ValueError as e:
+            raise ValueError(f"Failed decoding serialized state index: {e}") from e
+
+        expected_keys = {'meta', 'forcing_history', 'state', 'arrays'}
+        if not isinstance(index, dict) or set(index) != expected_keys:
+            raise ValueError(
+                f"Serialized state index must hold the keys {sorted(expected_keys)}.",
+            )
+        arrays = self._decode_arrays(index['arrays'], body, index_size)
+        state = self._unpack_arrays(index['state'], arrays)
+
+        expected_sections = {'bmi', 'buffers', 'outputs', 'model'}
+        if not isinstance(state, dict) or set(state) != expected_sections:
+            raise ValueError(
+                f"Serialized state must hold the sections {sorted(expected_sections)}.",
+            )
+        payload = {
+            'meta': index['meta'],
+            'forcing_history': index['forcing_history'],
+            **state,
+        }
+
+        # Model identity and settings
+        meta = payload['meta']
+        if not isinstance(meta, dict):
+            raise ValueError("Serialized state metadata must be a mapping.")
+        for key, expected in self._serialization_metadata().items():
+            found = meta.get(key)
+            if key == 'catchment_id' and (found is None or expected is None):
+                continue
+            if found != expected:
+                raise ValueError(
+                    f"Serialized state does not match this BMI: '{key}' is "
+                    f"{found!r}, expected {expected!r}.",
+                )
+
+        # BMI fields
+        bmi_fields = payload['bmi']
+        if set(bmi_fields) != set(self._SERIALIZED_FIELDS):
+            raise ValueError(
+                f"Serialized BMI fields {sorted(bmi_fields)} do not match "
+                f"{sorted(self._SERIALIZED_FIELDS)}.",
+            )
+        for field in self._SERIALIZED_FIELDS:
+            current = getattr(self, field)
+            if isinstance(current, np.ndarray):
+                self._check_array(field, bmi_fields[field], current.shape)
+
+        # Ring buffers (absent when saved without forcing history)
+        if not isinstance(payload['forcing_history'], bool):
+            raise ValueError("Serialized 'forcing_history' must be a bool.")
+        expected_buffers = (
+            set(self._SERIALIZED_BUFFERS) if payload['forcing_history'] else set()
+        )
+        if set(payload['buffers']) != expected_buffers:
+            raise ValueError(
+                f"Serialized buffers {sorted(payload['buffers'])} do not match "
+                f"{sorted(expected_buffers)}.",
+            )
+        for field in expected_buffers:
+            ring = getattr(self, field)
+            saved = payload['buffers'][field]
+            self._check_array(field, saved['buffer'], ring.buffer.shape)
+            if not 0 <= int(saved['ptr']) < ring.capacity:
+                raise ValueError(
+                    f"Serialized '{field}' pointer {saved['ptr']} is outside "
+                    f"[0, {ring.capacity}).",
+                )
+
+        # Outputs
+        if set(payload['outputs']) != set(self._output_vars):
+            raise ValueError(
+                f"Serialized outputs {sorted(payload['outputs'])} do not match "
+                f"{sorted(self._output_vars)}.",
+            )
+
+        return payload
+
+    def _check_array(self, name: str, value: Any, shape: tuple) -> None:
+        """Check that a decoded array has the expected shape and dtype."""
+        if not isinstance(value, torch.Tensor):
+            raise ValueError(f"Serialized '{name}' is not an array.")
+        if tuple(value.shape) != tuple(shape) or value.dtype != self.pt_dtype:
+            raise ValueError(
+                f"Serialized '{name}' has shape {tuple(value.shape)} and dtype "
+                f"{value.dtype}, expected {tuple(shape)} and {self.pt_dtype}.",
+            )
+
+    def _apply_state(self, payload: dict[str, Any]) -> None:
+        """Write a decoded payload into the BMI and model.
+
+        Parameters
+        ----------
+        payload
+            Payload returned by '_decode_state'.
+        """
+        for field in self._SERIALIZED_FIELDS:
+            value = payload['bmi'][field]
+            if isinstance(value, torch.Tensor):
+                value = value.numpy().astype(self.np_dtype, copy=True)
+            setattr(self, field, value)
+
+        for field in self._SERIALIZED_BUFFERS:
+            ring = getattr(self, field)
+            saved = payload['buffers'].get(field)
+            if saved is None:
+                # Saved without forcing history: refill from new forcing.
+                ring.buffer[...] = 0
+                ring.ptr = 0
+                ring.is_full = False
+            else:
+                ring.buffer[...] = saved['buffer'].numpy()
+                ring.ptr = int(saved['ptr'])
+                ring.is_full = bool(saved['is_full'])
+
+        if not payload['forcing_history'] and self._is_warm:
+            # Restart the warmup cycle at the next day boundary, where
+            # '_is_warmup_trigger_step' sees a multiple of 'warmup_interval'.
+            to_boundary = -self._timestep % 24
+            self._steps_since_warmup = -to_boundary % self.warmup_interval
+
+        for name, value in payload['outputs'].items():
+            self._output_vars[name]['value'] = value.numpy().astype(
+                self.np_dtype,
+                copy=True,
+            )
+
+        self._model.dpl_model.load_runtime_state(payload['model'])
+
+    def _restore_state(self, blob: bytes) -> None:
+        """Restore BMI and model state from bytes made by '_capture_state'.
+
+        The payload is fully decoded and validated before anything is written.
+        If writing still fails, the previous state is put back and the error
+        is raised, so a failed restore never leaves a half-restored model.
+
+        Parameters
+        ----------
+        blob
+            Serialized state.
+        """
+        self._require_runtime_state()
+        payload = self._decode_state(blob)
+
+        backup = self._decode_state(self._capture_state(forcing_history=True))
+        try:
+            self._apply_state(payload)
+        except Exception:
+            self._apply_state(backup)
+            raise
+
+        if self.verbose:
+            log.info(
+                f"Restored state at step {self._timestep} "
+                f"(warm: {self._is_warm}, forcing history: "
+                f"{payload['forcing_history']}, {len(blob)} bytes)",
+            )
 
     # =========================================================================#
 
@@ -1338,6 +1945,8 @@ class MtsDeltaModelBmi(Bmi):
 
     def get_var_units(self, name: str) -> str:
         """Get units of the given variable."""
+        if name in _serial_var_units:
+            return _serial_var_units[name]
         return {**self._dynamic_var, **self._output_vars}[name]['units']
 
     def get_var_itemsize(self, name: str) -> int:
@@ -1346,6 +1955,9 @@ class MtsDeltaModelBmi(Bmi):
 
     def get_var_nbytes(self, name: str) -> int:
         """Get size, in bytes, of the given variable."""
+        if name == _SERIAL_STATE:
+            # Size of the last capture, or of the payload announced for restore.
+            return int(self._serial_vars[_SERIAL_SIZE][0])
         return self.get_var_itemsize(name) * len(self.get_value_ptr(name))
 
     def get_var_location(self, name: str) -> str:
@@ -1377,12 +1989,17 @@ class MtsDeltaModelBmi(Bmi):
 
     def get_value(self, name: str, dest: NDArray) -> NDArray:
         """Get a copy of values of the given variable."""
+        if name in self._serial_vars:
+            dest[:] = self._serial_vars[name]
+            return dest
         tmp = self.get_value_ptr(name).flatten()
         dest[:] = self._to_external_units(name, tmp.tolist())
         return dest
 
     def get_value_ptr(self, name: str) -> NDArray:
         """Get a reference to values of the given variable."""
+        if name in self._serial_vars:
+            return self._serial_vars[name]
         return self._all_vars[name]['value']
 
     def get_value_at_indices(
@@ -1409,10 +2026,15 @@ class MtsDeltaModelBmi(Bmi):
         return dest
 
     def set_value(self, name: str, src: NDArray) -> None:
-        """Specify a new value for a model variable.
+        """Specify a new value for a model var.
 
-        NOTE: ngen uses this for setting dynamic inputs.
+        NOTE: ngen uses this for setting dynamic inputs, and for driving the
+        serialization protocol through its reserved 'ngen::' vars.
         """
+        if name in self._serial_vars:
+            self._set_serial_value(name, src)
+            return
+
         # NOTE: dtype is preserved here; PET is derived from these values before
         # they reach the (possibly lower precision) buffers.
         src = np.array(src)  # copy; callers may reuse buffer

@@ -7,9 +7,8 @@ hydrograph for catchment `cat-2453`:
 2. ngen -- the same BMI driven by NextGen through its Python BMI adapter
 3. t-route -- NextGen's runoff routed through Muskingum-Cunge
 
-(1) answers "is the model reproducing the benchmark", (2) answers "is ngen
-wiring feeding the model what it expects", and (3) answers "is the routing stack
-attached and conserving water".
+(1) ensures model reproduces benchmark, (2) ensures ngen wiring feeds the model
+what it expects, and (3) ensures the routing is consistent.
 
 @leoglonz
 """
@@ -25,16 +24,10 @@ import pytest
 
 PKG_ROOT = Path(__file__).parent.parent
 
-
-# Tolerances
+# Settings -------- #
 ATOL = 1e-6
 ROUTED_VOLUME_TOL = 0.01
 ROUTED_MIN_CORR = 0.95
-
-
-# ---------------------------------------------------------------------------- #
-#  Fixed properties of the included realizations
-# ---------------------------------------------------------------------------- #
 
 
 CATCHMENT = 'cat-2453'
@@ -66,6 +59,7 @@ MODEL_CONFIG_PATH = DATA_ROOT / 'dhbv_2_mts' / 'model' / 'dhbv_2_mts' / 'config.
 BENCHMARK_PATH = PKG_ROOT / 'tests' / 'benchmarks' / 'mts_cat-2453_runoff.npz'
 
 STANDALONE_RUN = PKG_ROOT / 'output' / f'dhbv_2_mts_{CATCHMENT}_runoff.npy'
+# ----------------- #
 
 
 # ---------------------------------------------------------------------------- #
