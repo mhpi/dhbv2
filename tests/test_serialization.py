@@ -1,28 +1,36 @@
-"""Tests for MtsDeltaModelBmi checkpoint/restore (ngen serialization protocol).
+"""Tests for dHBV2 BMI checkpoint/restore (ngen serialization protocol).
 
 Coverage:
-- Reserved variable introspection (units, types, item sizes)
-- Reserved names hidden from the input/output lists
-- Save -> restore -> continue reproduces an uninterrupted run, per warmup mode
+- Reserved variable introspection (units, types, item sizes), both BMIs
+- Reserved names hidden from the input/output lists, both BMIs
+- MTS: save -> restore -> continue reproduces an uninterrupted run, per
+  warmup mode
 - Restore without forcing history keeps stepping, defers warmups until the
   buffers refill, and rejoins the uninterrupted run after a full re-spin
-- Restore rejects a foreign payload, and rolls back a failed write
+- MTS: restore rejects a foreign payload, and rolls back a failed write
+- Daily: save -> restore -> continue reproduces an uninterrupted run, saved
+  before (with the daily buffer) and after the warmup (without it)
 """
 
+import os
+
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 import pytest
 import xarray as xr
 import yaml
 
+from dhbv2.bmi import DeltaModelBmi
 from dhbv2.mts_bmi import MtsDeltaModelBmi
 
 PKG_ROOT = Path(__file__).parent.parent
 DATA_DIR = PKG_ROOT / 'ngen_resources' / 'data'
 BMI_CONFIG = DATA_DIR / 'dhbv_2_mts' / 'config' / 'bmi_cat-2453.yaml'
 MODEL_DIR = DATA_DIR / 'dhbv_2_mts' / 'model' / 'dhbv_2_mts'
+DAILY_BMI_CONFIG = DATA_DIR / 'dhbv_2' / 'config' / 'bmi_cat-2453.yaml'
+DAILY_MODEL_DIR = DATA_DIR / 'dhbv_2' / 'model' / 'dhbv_2'
 FORCING = (
     DATA_DIR / 'forcing' / 'camels_subset_2008-01-09 00_00_00_2010-12-30 23_00_00.nc'
 )
@@ -42,6 +50,9 @@ SAVE_STEP = 24 * 7 + 5
 # LEAN_SAVE_STEP (step 216), which lines up with the uninterrupted cycle.
 LEAN_SAVE_STEP = 24 * 8 + 5
 LEAN_N_STEPS = 24 * 17
+
+# Daily model with a 5-day warmup: first prediction at the end of day 6.
+DAILY_RHO = 5
 
 pytestmark = [
     pytest.mark.skipif(
@@ -116,14 +127,43 @@ def write_config(
     return path
 
 
-def make_bmi(config_path: Path) -> MtsDeltaModelBmi:
+def write_daily_config(tmp_path: Path) -> Path:
+    """Write a cat-2453 daily BMI config whose model warms up over DAILY_RHO days.
+
+    The model directory is a copy of the shipped one with 'rho' shortened,
+    linking to the shipped weights and normalization statistics.
+    """
+    model_dir = tmp_path / 'daily_model'
+    model_dir.mkdir()
+    with open(DAILY_MODEL_DIR / 'config.yaml') as f:
+        model_config = yaml.safe_load(f)
+    model_config['model']['rho'] = DAILY_RHO
+    with open(model_dir / 'config.yaml', 'w') as f:
+        yaml.safe_dump(model_config, f)
+    for name in os.listdir(DAILY_MODEL_DIR):
+        if name != 'config.yaml':
+            (model_dir / name).symlink_to(DAILY_MODEL_DIR / name)
+
+    with open(DAILY_BMI_CONFIG) as f:
+        config = yaml.safe_load(f)
+    config['model_dir'] = str(model_dir)
+    path = tmp_path / 'bmi_daily.yaml'
+    with open(path, 'w') as f:
+        yaml.safe_dump(config, f)
+    return path
+
+
+def make_bmi(
+    config_path: Path,
+    bmi_class: type = MtsDeltaModelBmi,
+) -> Union[MtsDeltaModelBmi, DeltaModelBmi]:
     """Initialize a BMI from a config path."""
-    bmi = MtsDeltaModelBmi(verbose=False)
+    bmi = bmi_class(verbose=False)
     bmi.initialize(str(config_path))
     return bmi
 
 
-def step(bmi: MtsDeltaModelBmi, forcing: dict, t: int) -> float:
+def step(bmi: Union[MtsDeltaModelBmi, DeltaModelBmi], forcing: dict, t: int) -> float:
     """Set step t's forcing, update, and return the runoff."""
     for name, values in forcing.items():
         bmi.set_value(name, np.float64(values[t]))
@@ -133,7 +173,7 @@ def step(bmi: MtsDeltaModelBmi, forcing: dict, t: int) -> float:
     return float(dest[0])
 
 
-def save(bmi: MtsDeltaModelBmi) -> np.ndarray:
+def save(bmi: Union[MtsDeltaModelBmi, DeltaModelBmi]) -> np.ndarray:
     """Run the protocol's save sequence and return the payload bytes."""
     bmi.set_value(CREATE, np.zeros(1, dtype=np.int32))
     size = np.zeros(1, dtype=np.int64)
@@ -144,7 +184,7 @@ def save(bmi: MtsDeltaModelBmi) -> np.ndarray:
     return blob
 
 
-def restore(bmi: MtsDeltaModelBmi, blob: np.ndarray) -> None:
+def restore(bmi: Union[MtsDeltaModelBmi, DeltaModelBmi], blob: np.ndarray) -> None:
     """Run the protocol's restore sequence."""
     bmi.set_value(SIZE, np.array([blob.size], dtype=np.int64))
     bmi.set_value(STATE, blob)
@@ -155,6 +195,7 @@ def restore(bmi: MtsDeltaModelBmi, blob: np.ndarray) -> None:
 # ---------------------------------------------------------------------------- #
 
 
+@pytest.mark.parametrize('bmi_fixture', ['mts_bmi', 'daily_bmi'])
 class TestReservedVariables:
     """Reserved variables resolve as the protocol requires."""
 
@@ -167,17 +208,25 @@ class TestReservedVariables:
             (STATE, 'ngen::opaque', 'uint8', 1),
         ],
     )
-    def test_introspection(self, mts_bmi, name, units, var_type, itemsize):
+    def test_introspection(
+        self,
+        request,
+        bmi_fixture,
+        name,
+        units,
+        var_type,
+        itemsize,
+    ):
         """Units, type, and item size match the protocol table."""
-        assert mts_bmi.get_var_units(name) == units
-        assert mts_bmi.get_var_type(name) == var_type
-        assert mts_bmi.get_var_itemsize(name) == itemsize
+        bmi = request.getfixturevalue(bmi_fixture)
+        assert bmi.get_var_units(name) == units
+        assert bmi.get_var_type(name) == var_type
+        assert bmi.get_var_itemsize(name) == itemsize
 
-    def test_not_listed(self, mts_bmi):
+    def test_not_listed(self, request, bmi_fixture):
         """Reserved names are not in the input or output variable lists."""
-        listed = set(mts_bmi.get_input_var_names()) | set(
-            mts_bmi.get_output_var_names(),
-        )
+        bmi = request.getfixturevalue(bmi_fixture)
+        listed = set(bmi.get_input_var_names()) | set(bmi.get_output_var_names())
         assert not listed & {CREATE, FREE, SIZE, STATE}
 
 
@@ -315,3 +364,38 @@ class TestRejectedRestore:
         with pytest.raises(RuntimeError, match='Injected'):
             restore(fresh, blob)
         self.assert_unchanged(fresh, before)
+
+
+# ---------------------------------------------------------------------------- #
+#  Daily model
+# ---------------------------------------------------------------------------- #
+
+
+@pytest.mark.skipif(
+    not DAILY_MODEL_DIR.exists(),
+    reason="Shipped daily model weights not found.",
+)
+class TestDailyRoundTrip:
+    """Daily BMI: save -> restore -> continue matches an uninterrupted run."""
+
+    @pytest.mark.parametrize(
+        'save_step',
+        [24 * 3 + 7, 24 * 7 + 13],
+        ids=['before-warmup', 'after-warmup'],
+    )
+    def test_resume_matches_uninterrupted(self, tmp_path, forcing, save_step):
+        """A restored daily BMI continues bit-for-bit."""
+        config = write_daily_config(tmp_path)
+        source = make_bmi(config, DeltaModelBmi)
+        for t in range(save_step):
+            step(source, forcing, t)
+        blob = save(source)
+        expected = [step(source, forcing, t) for t in range(save_step, N_STEPS)]
+
+        target = make_bmi(config, DeltaModelBmi)
+        restore(target, blob)
+        assert target.get_current_time() == save_step * target.get_time_step()
+        result = [step(target, forcing, t) for t in range(save_step, N_STEPS)]
+
+        assert np.count_nonzero(expected) > 0
+        np.testing.assert_array_equal(result, expected)

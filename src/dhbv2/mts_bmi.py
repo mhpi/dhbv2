@@ -5,12 +5,9 @@ framework.
 @Leo Lonzarich
 """
 
-import hashlib
 import json
 import os
-import struct
 import time
-import zlib
 from typing import Any, Optional, Union
 
 import numpy as np
@@ -23,6 +20,13 @@ from numpy.typing import NDArray
 
 from dhbv2.log import configure_logging, log
 from dhbv2.pet import penman_monteith_pet
+from dhbv2.serialization import (
+    SERIAL_STATE,
+    SERIAL_VAR_UNITS,
+    SerializableBmi,
+    decode_payload,
+    encode_payload,
+)
 from dhbv2.utils import RingBuffer
 
 root_path = os.path.dirname(os.path.abspath(__file__))
@@ -162,28 +166,9 @@ _hourly_modes = {
 # --------------------------------- #
 # (6) ngen BMI Serialization Protocol
 # --------------------------------- #
-# See NOAA-OWP/ngen/doc/BMI_SERIALIZATION_PROTOCOL.md
-# Resolved by name and never listed in input/output var names.
-_SERIAL_CREATE = 'ngen::serialization_create'
-_SERIAL_FREE = 'ngen::serialization_free'
-_SERIAL_SIZE = 'ngen::serialization_size'
-_SERIAL_STATE = 'ngen::serialization_state'
-
-_serial_var_units = {
-    _SERIAL_CREATE: 'ngen::trigger',
-    _SERIAL_FREE: 'ngen::trigger',
-    _SERIAL_SIZE: 'bytes',
-    _SERIAL_STATE: 'ngen::opaque',
-}
-
+# Reserved variables and payload format live in dhbv2.serialization; this
+# names the model in a payload's header.
 _SERIAL_MAGIC = b'DHBV2MTS'
-_SERIAL_VERSION = 1
-_SERIAL_HEADER = struct.Struct('<8sII')
-
-_SERIAL_DTYPE_KINDS = 'fiub'
-
-# Avoid something dangerous
-_SERIAL_MAX_BYTES = 64 * 1024**2
 
 
 def map_to_external(name: str):
@@ -199,7 +184,7 @@ def map_to_internal(name: str):
 # -------------------------------------------------- #
 # (5) BMI
 # -------------------------------------------------- #
-class MtsDeltaModelBmi(Bmi):
+class MtsDeltaModelBmi(SerializableBmi, Bmi):
     """
     (δHBV2.0/2.1 MTS BMI) NextGen-compatible, differentiable, physics-informed ML
     rainfall-runoff model for hydrologic forecasting (Yang et al., 2026; Song
@@ -366,13 +351,7 @@ class MtsDeltaModelBmi(Bmi):
         }
 
         # ngen serialization protocol
-        self._serial_vars = {
-            _SERIAL_CREATE: np.zeros(1, dtype=np.int32),
-            _SERIAL_FREE: np.zeros(1, dtype=np.int32),
-            _SERIAL_SIZE: np.zeros(1, dtype=np.int64),
-            _SERIAL_STATE: np.zeros(0, dtype=np.uint8),
-        }
-        self._weights_sha256 = None
+        self._init_serial_vars()
         self.serial_forcing_history = True  # -> _parse_serialization_config
 
         # --- Other ---
@@ -1161,60 +1140,13 @@ class MtsDeltaModelBmi(Bmi):
         '_daily_buffer',
     )
 
-    def _set_serial_value(self, name: str, src: Any) -> None:
-        """Handle 'set_value' on a reserved serialization variable.
+    def _runtime_model(self) -> torch.nn.Module:
+        """Return the dPL model whose runtime state is serialized."""
+        return self._model.dpl_model
 
-        Parameters
-        ----------
-        name
-            Reserved variable name.
-        src
-            Value passed by the caller. Ignored for the two triggers.
-        """
-        if name == _SERIAL_CREATE:
-            self._create_serialization()
-        elif name == _SERIAL_FREE:
-            self._free_serialization()
-        elif name == _SERIAL_SIZE:
-            self._serial_vars[_SERIAL_SIZE][0] = int(np.asarray(src).ravel()[0])
-        else:
-            if isinstance(src, (bytes, bytearray)):
-                blob = np.frombuffer(src, dtype=np.uint8)
-            else:
-                blob = np.asarray(src, dtype=np.uint8).ravel()
-            expected = int(self._serial_vars[_SERIAL_SIZE][0])
-            if expected and blob.size != expected:
-                raise ValueError(
-                    f"Serialized state has {blob.size} bytes, but "
-                    f"'{_SERIAL_SIZE}' announced {expected}.",
-                )
-            self._restore_state(blob.tobytes())
-
-    def _create_serialization(self) -> None:
-        """Capture the current state into the serialization buffer.
-
-        Does not change the model's computed state.
-        """
-        blob = self._capture_state()
-        self._serial_vars[_SERIAL_STATE] = np.frombuffer(blob, dtype=np.uint8).copy()
-        self._serial_vars[_SERIAL_SIZE][0] = len(blob)
-
-    def _free_serialization(self) -> None:
-        """Release the serialization buffer. Safe to call at any time."""
-        self._serial_vars[_SERIAL_STATE] = np.zeros(0, dtype=np.uint8)
-        self._serial_vars[_SERIAL_SIZE][0] = 0
-
-    def _require_runtime_state(self) -> None:
-        """Check that the BMI and installed dmg support serialization."""
-        if not self._initialized:
-            raise RuntimeError(
-                "BMI must be initialized before its state can be saved or restored.",
-            )
-        if not hasattr(self._model.dpl_model, 'get_runtime_state'):
-            raise RuntimeError(
-                "State serialization requires a dmg whose MtsDplModel supports "
-                "'get_runtime_state'. Update dmg and hydrodl2.",
-            )
+    def _capture_backup(self) -> bytes:
+        """Capture everything needed to undo a failed restore."""
+        return self._capture_state(forcing_history=True)
 
     def _serialization_metadata(self) -> dict[str, Any]:
         """Identify the model and settings a payload is only valid for.
@@ -1225,17 +1157,10 @@ class MtsDeltaModelBmi(Bmi):
             Model name and version, SHA-256 of the loaded weights, dtype,
             unit count, catchment ID, and warmup settings.
         """
-        if self._weights_sha256 is None:
-            digest = hashlib.sha256()
-            for key, value in self._model.dpl_model.state_dict().items():
-                digest.update(key.encode())
-                digest.update(value.detach().cpu().contiguous().numpy().tobytes())
-            self._weights_sha256 = digest.hexdigest()
-
         return {
             'model': self._name,
             'version': self._version,
-            'weights_sha256': self._weights_sha256,
+            'weights_sha256': self._weights_digest(),
             'dtype': self._dtype,
             'n_units': self.n_units,
             'catchment_id': self.bmi_config.get('catchment_id'),
@@ -1247,58 +1172,6 @@ class MtsDeltaModelBmi(Bmi):
                 'warmup_interval': self.warmup_interval,
             },
         }
-
-    @staticmethod
-    def _pack_arrays(value: Any, arrays: list[np.ndarray]) -> Any:
-        """Swap every array in a nested container for an index into 'arrays'.
-
-        Parameters
-        ----------
-        value
-            Nested dicts, lists, and tuples of arrays, tensors, and scalars.
-        arrays
-            Receives the arrays in the order they are indexed.
-
-        Returns
-        -------
-        Any
-            The same structure, JSON-serializable, with each array or tensor
-            replaced by {'#': i}.
-        """
-        if isinstance(value, torch.Tensor):
-            value = value.detach().cpu().contiguous().numpy()
-        if isinstance(value, np.ndarray):
-            arrays.append(np.ascontiguousarray(value))
-            return {'#': len(arrays) - 1}
-        if isinstance(value, dict):
-            return {
-                k: MtsDeltaModelBmi._pack_arrays(v, arrays) for k, v in value.items()
-            }
-        if isinstance(value, (list, tuple)):
-            return [MtsDeltaModelBmi._pack_arrays(v, arrays) for v in value]
-        if isinstance(value, (bool, np.bool_)):
-            return bool(value)
-        if isinstance(value, (int, np.integer)):
-            return int(value)
-        if value is None or isinstance(value, str):
-            return value
-        raise TypeError(f"Cannot serialize a value of type {type(value).__name__}.")
-
-    @staticmethod
-    def _unpack_arrays(value: Any, arrays: list[torch.Tensor]) -> Any:
-        """Invert '_pack_arrays', swapping each {'#': i} for 'arrays[i]'."""
-        if isinstance(value, dict):
-            if set(value) == {'#'}:
-                index = value['#']
-                if not isinstance(index, int) or not 0 <= index < len(arrays):
-                    raise ValueError(f"Serialized array index {index!r} is invalid.")
-                return arrays[index]
-            return {
-                k: MtsDeltaModelBmi._unpack_arrays(v, arrays) for k, v in value.items()
-            }
-        if isinstance(value, list):
-            return [MtsDeltaModelBmi._unpack_arrays(v, arrays) for v in value]
-        return value
 
     def _capture_state(self, forcing_history: Optional[bool] = None) -> bytes:
         """Encode the full BMI and model state as bytes.
@@ -1312,9 +1185,8 @@ class MtsDeltaModelBmi(Bmi):
         Returns
         -------
         bytes
-            Header, then the compressed JSON index and raw array bytes (see
-            '_SERIAL_HEADER') for the metadata, BMI fields, ring buffers,
-            outputs, and model runtime state.
+            Payload (see dhbv2.serialization) holding the metadata, BMI
+            fields, ring buffers, outputs, and model runtime state.
         """
         self._require_runtime_state()
         if forcing_history is None:
@@ -1337,76 +1209,13 @@ class MtsDeltaModelBmi(Bmi):
                 name: np.array(entry['value'], dtype=self.np_dtype)
                 for name, entry in self._output_vars.items()
             },
-            'model': self._model.dpl_model.get_runtime_state(),
+            'model': self._runtime_model().get_runtime_state(),
         }
-
-        arrays = []
         index = {
             'meta': self._serialization_metadata(),
             'forcing_history': forcing_history,
-            'state': self._pack_arrays(state, arrays),
         }
-        index['arrays'] = [[a.dtype.str, list(a.shape)] for a in arrays]
-        index_bytes = json.dumps(index, separators=(',', ':')).encode('utf-8')
-
-        header = _SERIAL_HEADER.pack(_SERIAL_MAGIC, _SERIAL_VERSION, len(index_bytes))
-        body = b''.join([index_bytes, *(a.tobytes() for a in arrays)])
-        return header + zlib.compress(body)
-
-    def _decode_arrays(
-        self,
-        table: Any,
-        blob: bytes,
-        offset: int,
-    ) -> list[torch.Tensor]:
-        """Read the raw arrays that follow the JSON index.
-
-        Parameters
-        ----------
-        table
-            The index's [dtype, shape] entries, in storage order.
-        blob
-            The decompressed payload body.
-        offset
-            Byte offset of the first array.
-
-        Returns
-        -------
-        list[torch.Tensor]
-            One tensor per table entry.
-        """
-        if not isinstance(table, list):
-            raise ValueError("Serialized array table must be a list.")
-
-        arrays = []
-        for entry in table:
-            try:
-                dtype_str, shape = entry
-                dtype = np.dtype(dtype_str)
-                shape = tuple(int(n) for n in shape)
-            except (TypeError, ValueError) as e:
-                raise ValueError(f"Invalid serialized array entry {entry!r}.") from e
-            if dtype.kind not in _SERIAL_DTYPE_KINDS or not dtype.isnative:
-                raise ValueError(f"Unsupported serialized array dtype '{dtype_str}'.")
-            if any(n < 0 for n in shape):
-                raise ValueError(f"Invalid serialized array shape {shape}.")
-
-            count = int(np.prod(shape, dtype=np.int64))
-            end = offset + count * dtype.itemsize
-            if end > len(blob):
-                raise ValueError(
-                    f"Serialized state is truncated: an array needs bytes up to "
-                    f"{end}, but the payload has {len(blob)}.",
-                )
-            values = np.frombuffer(blob, dtype=dtype, count=count, offset=offset)
-            arrays.append(torch.from_numpy(values.reshape(shape).copy()))
-            offset = end
-
-        if offset != len(blob):
-            raise ValueError(
-                f"Serialized state has {len(blob) - offset} unexpected trailing bytes.",
-            )
-        return arrays
+        return encode_payload(_SERIAL_MAGIC, index, state)
 
     def _decode_state(self, blob: bytes) -> dict[str, Any]:
         """Decode and validate a payload without touching model state.
@@ -1423,53 +1232,13 @@ class MtsDeltaModelBmi(Bmi):
             'outputs', 'model'), checked against this BMI's model, settings,
             and array shapes.
         """
-        if len(blob) < _SERIAL_HEADER.size:
-            raise ValueError(
-                f"Serialized state is {len(blob)} bytes, shorter than its "
-                f"{_SERIAL_HEADER.size}-byte header.",
-            )
-        magic, version, index_size = _SERIAL_HEADER.unpack_from(blob)
-        if magic != _SERIAL_MAGIC:
-            raise ValueError(
-                f"Serialized state has magic {magic!r}, expected {_SERIAL_MAGIC!r}. "
-                "It was not written by this model.",
-            )
-        if version != _SERIAL_VERSION:
-            raise ValueError(
-                f"Unsupported serialized state format version {version} "
-                f"(expected {_SERIAL_VERSION}).",
-            )
-
-        inflater = zlib.decompressobj()
-        try:
-            body = inflater.decompress(blob[_SERIAL_HEADER.size :], _SERIAL_MAX_BYTES)
-        except zlib.error as e:
-            raise ValueError(f"Failed decompressing serialized state: {e}") from e
-        if inflater.unconsumed_tail:
-            raise ValueError(
-                f"Serialized state exceeds {_SERIAL_MAX_BYTES} bytes decompressed.",
-            )
-        if not inflater.eof or inflater.unused_data:
-            raise ValueError("Serialized state is truncated or has trailing bytes.")
-
-        if index_size > len(body):
-            raise ValueError(
-                f"Serialized state is truncated: its index needs {index_size} "
-                f"bytes, but the body has {len(body)}.",
-            )
-        try:
-            index = json.loads(body[:index_size].decode('utf-8'))
-        except ValueError as e:
-            raise ValueError(f"Failed decoding serialized state index: {e}") from e
-
-        expected_keys = {'meta', 'forcing_history', 'state', 'arrays'}
-        if not isinstance(index, dict) or set(index) != expected_keys:
+        index = decode_payload(_SERIAL_MAGIC, blob)
+        expected_keys = {'meta', 'forcing_history', 'state'}
+        if set(index) != expected_keys:
             raise ValueError(
                 f"Serialized state index must hold the keys {sorted(expected_keys)}.",
             )
-        arrays = self._decode_arrays(index['arrays'], body, index_size)
-        state = self._unpack_arrays(index['state'], arrays)
-
+        state = index['state']
         expected_sections = {'bmi', 'buffers', 'outputs', 'model'}
         if not isinstance(state, dict) or set(state) != expected_sections:
             raise ValueError(
@@ -1482,18 +1251,7 @@ class MtsDeltaModelBmi(Bmi):
         }
 
         # Model identity and settings
-        meta = payload['meta']
-        if not isinstance(meta, dict):
-            raise ValueError("Serialized state metadata must be a mapping.")
-        for key, expected in self._serialization_metadata().items():
-            found = meta.get(key)
-            if key == 'catchment_id' and (found is None or expected is None):
-                continue
-            if found != expected:
-                raise ValueError(
-                    f"Serialized state does not match this BMI: '{key}' is "
-                    f"{found!r}, expected {expected!r}.",
-                )
+        self._check_metadata(payload['meta'], self._serialization_metadata())
 
         # BMI fields
         bmi_fields = payload['bmi']
@@ -1537,16 +1295,6 @@ class MtsDeltaModelBmi(Bmi):
 
         return payload
 
-    def _check_array(self, name: str, value: Any, shape: tuple) -> None:
-        """Check that a decoded array has the expected shape and dtype."""
-        if not isinstance(value, torch.Tensor):
-            raise ValueError(f"Serialized '{name}' is not an array.")
-        if tuple(value.shape) != tuple(shape) or value.dtype != self.pt_dtype:
-            raise ValueError(
-                f"Serialized '{name}' has shape {tuple(value.shape)} and dtype "
-                f"{value.dtype}, expected {tuple(shape)} and {self.pt_dtype}.",
-            )
-
     def _apply_state(self, payload: dict[str, Any]) -> None:
         """Write a decoded payload into the BMI and model.
 
@@ -1587,35 +1335,6 @@ class MtsDeltaModelBmi(Bmi):
             )
 
         self._model.dpl_model.load_runtime_state(payload['model'])
-
-    def _restore_state(self, blob: bytes) -> None:
-        """Restore BMI and model state from bytes made by '_capture_state'.
-
-        The payload is fully decoded and validated before anything is written.
-        If writing still fails, the previous state is put back and the error
-        is raised, so a failed restore never leaves a half-restored model.
-
-        Parameters
-        ----------
-        blob
-            Serialized state.
-        """
-        self._require_runtime_state()
-        payload = self._decode_state(blob)
-
-        backup = self._decode_state(self._capture_state(forcing_history=True))
-        try:
-            self._apply_state(payload)
-        except Exception:
-            self._apply_state(backup)
-            raise
-
-        if self.verbose:
-            log.info(
-                f"Restored state at step {self._timestep} "
-                f"(warm: {self._is_warm}, forcing history: "
-                f"{payload['forcing_history']}, {len(blob)} bytes)",
-            )
 
     # =========================================================================#
 
@@ -1945,8 +1664,8 @@ class MtsDeltaModelBmi(Bmi):
 
     def get_var_units(self, name: str) -> str:
         """Get units of the given variable."""
-        if name in _serial_var_units:
-            return _serial_var_units[name]
+        if name in SERIAL_VAR_UNITS:
+            return SERIAL_VAR_UNITS[name]
         return {**self._dynamic_var, **self._output_vars}[name]['units']
 
     def get_var_itemsize(self, name: str) -> int:
@@ -1955,9 +1674,8 @@ class MtsDeltaModelBmi(Bmi):
 
     def get_var_nbytes(self, name: str) -> int:
         """Get size, in bytes, of the given variable."""
-        if name == _SERIAL_STATE:
-            # Size of the last capture, or of the payload announced for restore.
-            return int(self._serial_vars[_SERIAL_SIZE][0])
+        if name == SERIAL_STATE:
+            return self._serial_var_nbytes()
         return self.get_var_itemsize(name) * len(self.get_value_ptr(name))
 
     def get_var_location(self, name: str) -> str:

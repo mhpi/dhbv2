@@ -14,7 +14,7 @@ import datetime
 import json
 import os
 import time
-from typing import Union
+from typing import Any, Union
 
 import numpy as np
 import torch
@@ -26,6 +26,13 @@ from numpy.typing import NDArray
 
 from dhbv2.log import configure_logging, log
 from dhbv2.pet import hargreaves_pet, penman_monteith_pet
+from dhbv2.serialization import (
+    SERIAL_STATE,
+    SERIAL_VAR_UNITS,
+    SerializableBmi,
+    decode_payload,
+    encode_payload,
+)
 from dhbv2.utils import RingBuffer
 
 root_path = os.path.dirname(os.path.abspath(__file__))
@@ -145,10 +152,18 @@ def map_to_internal(name: str):
     return _var_name_external_map[name]
 
 
+# --------------------------------- #
+# (5) ngen BMI Serialization Protocol
+# --------------------------------- #
+# Reserved variables and payload format live in dhbv2.serialization; this
+# names the model in a payload's header.
+_SERIAL_MAGIC = b'DHBV2DAY'
+
+
 # -------------------------------------------------- #
-# (5) BMI
+# (6) BMI
 # -------------------------------------------------- #
-class DeltaModelBmi(Bmi):
+class DeltaModelBmi(SerializableBmi, Bmi):
     """
     (δHBV2.0 Daily BMI) NextGen-compatible, differentiable, physics-informed ML
     rainfall-runoff model for hydrologic forecasting (Song et al., 2025).
@@ -158,6 +173,18 @@ class DeltaModelBmi(Bmi):
     (default 365 days), a batched warmup primes LSTM and HBV states. Each
     subsequent day runs a single-step sequential forward using cached states.
     Daily predictions are repeated for all 24 hourly outputs.
+
+    The BMI supports NextGen checkpoint/restore (the ngen BMI Serialization
+    Protocol, via the reserved 'ngen::serialization_*' variables). A
+    checkpoint holds the step and day counters, the partial day of hourly
+    forcing, the LSTM's hidden and cell states, the HBV states, the current
+    daily prediction, and the outputs; before the first warmup it also holds
+    the daily forcing buffer. Static parameters come from the MLP on the
+    catchment attributes and are recomputed every step, so they need no
+    saving. Restoring a checkpoint and continuing reproduces an uninterrupted
+    run. A checkpoint only restores into a BMI with the same weights, dtype,
+    'start_time', PET method, and warmup length (and catchment, if both
+    configs set 'catchment_id').
 
     Parameters
     ----------
@@ -240,6 +267,9 @@ class DeltaModelBmi(Bmi):
         self._pet_method = 'penman_monteith'
         self._latitude_rad = None  # Latitude in radians (for Hargreaves)
         self._day_count = 0  # Elapsed days since simulation start
+
+        # --- ngen serialization protocol (reserved variables) ---
+        self._init_serial_vars()
 
         # --- Other ---
         self.norm_stats = None
@@ -412,8 +442,9 @@ class DeltaModelBmi(Bmi):
                 self._daily_buffer.append(daily_data[0])
                 self._day_count += 1
 
-                # 3. Run model if we have enough daily history.
-                if len(self._daily_buffer) > self.req_daily_history:
+                # 3. Run model if we have enough daily history. A warm model
+                #    restored from a checkpoint starts with an empty buffer.
+                if self._is_warm or len(self._daily_buffer) > self.req_daily_history:
                     if not self._is_warm:
                         # --- WARMUP (batched) ---
                         # First time: run full history to prime LSTM + HBV states.
@@ -720,6 +751,203 @@ class DeltaModelBmi(Bmi):
 
     # =========================================================================#
 
+    # State Serialization (ngen BMI Serialization Protocol)
+
+    # =========================================================================#
+
+    # Scalar and array BMI attributes saved with the model state. Together with
+    # the daily buffer (before the warmup only), the current prediction, the
+    # output values, and the model's runtime state, this is the single list
+    # that save, restore, and validation all read.
+    _SERIALIZED_FIELDS = (
+        '_timestep',
+        '_is_warm',
+        '_day_aligned',
+        '_day_count',
+        '_day_accumulator',
+    )
+
+    def _runtime_model(self) -> torch.nn.Module:
+        """Return the dPL model whose runtime state is serialized."""
+        return self._model
+
+    def _serialization_metadata(self) -> dict[str, Any]:
+        """Identify the model and settings a payload is only valid for.
+
+        Returns
+        -------
+        dict
+            Model name and version, SHA-256 of the loaded weights, dtype,
+            unit count, catchment ID, start time (it anchors the hour of day
+            and, for Hargreaves PET, the day of year), PET method, and warmup
+            length.
+        """
+        return {
+            'model': self._name,
+            'version': self._version,
+            'weights_sha256': self._weights_digest(),
+            'dtype': self._dtype,
+            'n_units': self.n_units,
+            'catchment_id': self.bmi_config.get('catchment_id'),
+            'start_time': str(self.bmi_config.get('start_time')),
+            'pet_method': self._pet_method,
+            'req_daily_history': self.req_daily_history,
+        }
+
+    def _capture_state(self) -> bytes:
+        """Encode the full BMI and model state as bytes.
+
+        The daily buffer is only saved before the warmup; after it, each step
+        reads just the day it appended, so the buffer's history is unused.
+
+        Returns
+        -------
+        bytes
+            Payload (see dhbv2.serialization) holding the metadata, BMI
+            fields, daily buffer, current prediction, outputs, and model
+            runtime state.
+        """
+        self._require_runtime_state()
+
+        buffer = None
+        if not self._is_warm:
+            ring = self._daily_buffer
+            buffer = {'buffer': ring.buffer, 'ptr': ring.ptr, 'is_full': ring.is_full}
+
+        state = {
+            'bmi': {field: getattr(self, field) for field in self._SERIALIZED_FIELDS},
+            'buffer': buffer,
+            'prediction': self._current_prediction,
+            'outputs': {
+                name: np.array(entry['value'], dtype=self.np_dtype)
+                for name, entry in self._output_vars.items()
+            },
+            'model': self._runtime_model().get_runtime_state(),
+        }
+        return encode_payload(
+            _SERIAL_MAGIC,
+            {'meta': self._serialization_metadata()},
+            state,
+        )
+
+    def _decode_state(self, blob: bytes) -> dict[str, Any]:
+        """Decode and validate a payload without touching model state.
+
+        Parameters
+        ----------
+        blob
+            Bytes produced by '_capture_state'.
+
+        Returns
+        -------
+        dict
+            The decoded payload ('meta', 'bmi', 'buffer', 'prediction',
+            'outputs', 'model'), checked against this BMI's model, settings,
+            and array shapes.
+        """
+        index = decode_payload(_SERIAL_MAGIC, blob)
+        if set(index) != {'meta', 'state'}:
+            raise ValueError(
+                "Serialized state index must hold the keys ['meta', 'state'].",
+            )
+        state = index['state']
+        expected_sections = {'bmi', 'buffer', 'prediction', 'outputs', 'model'}
+        if not isinstance(state, dict) or set(state) != expected_sections:
+            raise ValueError(
+                f"Serialized state must hold the sections {sorted(expected_sections)}.",
+            )
+        payload = {'meta': index['meta'], **state}
+
+        # Model identity and settings
+        self._check_metadata(payload['meta'], self._serialization_metadata())
+
+        # BMI fields
+        bmi_fields = payload['bmi']
+        if set(bmi_fields) != set(self._SERIALIZED_FIELDS):
+            raise ValueError(
+                f"Serialized BMI fields {sorted(bmi_fields)} do not match "
+                f"{sorted(self._SERIALIZED_FIELDS)}.",
+            )
+        self._check_array(
+            '_day_accumulator',
+            bmi_fields['_day_accumulator'],
+            self._day_accumulator.shape,
+        )
+
+        # Daily buffer (saved only before the warmup)
+        saved = payload['buffer']
+        if (saved is None) != bool(bmi_fields['_is_warm']):
+            raise ValueError(
+                "Serialized daily buffer must be present exactly when the "
+                "model is not yet warm.",
+            )
+        if saved is not None:
+            ring = self._daily_buffer
+            self._check_array('_daily_buffer', saved['buffer'], ring.buffer.shape)
+            if not 0 <= int(saved['ptr']) < ring.capacity:
+                raise ValueError(
+                    f"Serialized '_daily_buffer' pointer {saved['ptr']} is outside "
+                    f"[0, {ring.capacity}).",
+                )
+
+        # Current prediction and outputs
+        prediction = payload['prediction']
+        if prediction is not None and set(prediction) != {'streamflow'}:
+            raise ValueError(
+                f"Serialized prediction keys {sorted(prediction)} do not match "
+                "['streamflow'].",
+            )
+        if set(payload['outputs']) != set(self._output_vars):
+            raise ValueError(
+                f"Serialized outputs {sorted(payload['outputs'])} do not match "
+                f"{sorted(self._output_vars)}.",
+            )
+
+        return payload
+
+    def _apply_state(self, payload: dict[str, Any]) -> None:
+        """Write a decoded payload into the BMI and model.
+
+        Parameters
+        ----------
+        payload
+            Payload returned by '_decode_state'.
+        """
+        for field in self._SERIALIZED_FIELDS:
+            value = payload['bmi'][field]
+            if isinstance(value, torch.Tensor):
+                value = value.numpy().astype(self.np_dtype, copy=True)
+            setattr(self, field, value)
+
+        ring = self._daily_buffer
+        saved = payload['buffer']
+        if saved is None:
+            # Warm: steps read only the day they append.
+            ring.buffer[...] = 0
+            ring.ptr = 0
+            ring.is_full = False
+        else:
+            ring.buffer[...] = saved['buffer'].numpy()
+            ring.ptr = int(saved['ptr'])
+            ring.is_full = bool(saved['is_full'])
+
+        prediction = payload['prediction']
+        self._current_prediction = (
+            None
+            if prediction is None
+            else {k: v.numpy().copy() for k, v in prediction.items()}
+        )
+
+        for name, value in payload['outputs'].items():
+            self._output_vars[name]['value'] = value.numpy().astype(
+                self.np_dtype,
+                copy=True,
+            )
+
+        self._runtime_model().load_runtime_state(payload['model'])
+
+    # =========================================================================#
+
     # Helper Functions
 
     # =========================================================================#
@@ -987,6 +1215,8 @@ class DeltaModelBmi(Bmi):
 
     def get_var_units(self, name: str) -> str:
         """Get units of the given variable."""
+        if name in SERIAL_VAR_UNITS:
+            return SERIAL_VAR_UNITS[name]
         return {**self._dynamic_var, **self._output_vars}[name]['units']
 
     def get_var_itemsize(self, name: str) -> int:
@@ -995,6 +1225,8 @@ class DeltaModelBmi(Bmi):
 
     def get_var_nbytes(self, name: str) -> int:
         """Get size, in bytes, of the given variable."""
+        if name == SERIAL_STATE:
+            return self._serial_var_nbytes()
         return self.get_var_itemsize(name) * len(self.get_value_ptr(name))
 
     def get_var_location(self, name: str) -> str:
@@ -1026,12 +1258,17 @@ class DeltaModelBmi(Bmi):
 
     def get_value(self, name: str, dest: NDArray) -> NDArray:
         """Get a copy of values of the given variable."""
+        if name in self._serial_vars:
+            dest[:] = self._serial_vars[name]
+            return dest
         tmp = self.get_value_ptr(name).flatten()
         dest[:] = self._to_external_units(name, tmp.tolist())
         return dest
 
     def get_value_ptr(self, name: str) -> NDArray:
         """Get a reference to values of the given variable."""
+        if name in self._serial_vars:
+            return self._serial_vars[name]
         return {**self._dynamic_var, **self._static_var, **self._output_vars}[name][
             'value'
         ]
@@ -1062,8 +1299,13 @@ class DeltaModelBmi(Bmi):
     def set_value(self, name: str, src: NDArray) -> None:
         """Specify a new value for a model variable.
 
-        NOTE: ngen uses this for setting dynamic inputs.
+        NOTE: ngen uses this for setting dynamic inputs, and for driving the
+        serialization protocol through its reserved 'ngen::' vars.
         """
+        if name in self._serial_vars:
+            self._set_serial_value(name, src)
+            return
+
         if not isinstance(src, np.ndarray):
             src = np.array([src])
         for dict in [self._dynamic_var, self._static_var, self._output_vars]:
