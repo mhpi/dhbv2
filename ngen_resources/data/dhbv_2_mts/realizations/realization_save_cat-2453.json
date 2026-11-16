@@ -33,7 +33,7 @@
   },
   "time": {
     "start_time": "2008-01-09 00:00:00",
-    "end_time": "2009-01-20 00:00:00",
+    "end_time": "2009-01-19 23:00:00",
     "output_interval": 3600
   },
   "serialization": {

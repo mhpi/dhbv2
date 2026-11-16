@@ -46,7 +46,7 @@ RUN dnf install -y epel-release \
     && dnf config-manager --set-enabled crb \
     && dnf install -y \
         sudo tar wget git \
-        gcc gcc-c++ make cmake \
+        gcc gcc-c++ libtsan make cmake \
         ninja-build \
         gcc-gfortran libgfortran \
         sqlite sqlite-devel \
@@ -212,10 +212,10 @@ FROM dependencies AS dhbv2_weights
 
 RUN dnf install -y git gcc python3-devel gcc-c++ awscli unzip
 
-RUN aws s3 cp s3://mhpi-spatial/mhpi-release/models/owp/dhbv_2_mts.zip /tmp/file.zip --no-sign-request && \
+RUN aws s3 cp s3://mhpi-spatial/mhpi-release/models/owp/dhbv_2.1_mts.zip /tmp/file.zip --no-sign-request && \
     unzip -o /tmp/file.zip -d /tmp && \
     mkdir -p /dhbv_2_weights && \
-    cp -r /tmp/dhbv_2_mts/* /dhbv_2_weights && \
+    cp -r /tmp/dhbv_2.1_mts/* /dhbv_2_weights && \
     rm -r /tmp
 
 
@@ -236,6 +236,10 @@ RUN mkdir -p /dmod/datasets /dmod/datasets/static /dmod/shared_libs /dmod/bin /d
     && ln -s ngen-serial ngen)
 
 RUN find ./extern -name "*.so*" -exec cp -a {} /dmod/shared_libs/ \;
+
+# Newer ngen builds the extern BMI libraries into <build>/extern-libs/ and
+# links ngen against them there, so copy them out for the final image.
+RUN find ./ngen_parallel/extern-libs -name "*.so*" -exec cp -a {} /dmod/shared_libs/ \;
 
 
 # Stage 10: Development image

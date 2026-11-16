@@ -1491,8 +1491,10 @@ class MtsDeltaModelBmi(SerializableBmi, Bmi):
             else:
                 output_val = outputs[internal_name]
 
+            # Keep outputs 1d: squeezing a single unit's output gives a 0d array
+            # and breaks 'len' in ngen size queries.
             if output_val.ndim != 1:
-                output_val = output_val.squeeze()
+                output_val = np.atleast_1d(output_val.squeeze())
             self._output_vars[name]['value'] = output_val
 
     def _load_norm_stats(self) -> None:
@@ -1676,7 +1678,7 @@ class MtsDeltaModelBmi(SerializableBmi, Bmi):
         """Get size, in bytes, of the given variable."""
         if name == SERIAL_STATE:
             return self._serial_var_nbytes()
-        return self.get_var_itemsize(name) * len(self.get_value_ptr(name))
+        return self.get_value_ptr(name).nbytes
 
     def get_var_location(self, name: str) -> str:
         """Get the grid element type that the given variable is defined on."""
